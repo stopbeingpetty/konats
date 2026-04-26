@@ -1,0 +1,85 @@
+@import url("https://fonts.googleapis.com/css2?family=Rajdhani:wght@700&family=Work+Sans:ital,wght@0,300..700;1,300..700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-brand-green-dark: #1a472a;
+  --color-brand-green-mid: #2d5a3d;
+  --color-brand-gold: #c9a227;
+
+  --font-heading: "Rajdhani", sans-serif;
+  --font-body: "Work Sans", sans-serif;
+}
+
+:root {
+  --background: 0 0% 98%;
+  --foreground: 150 47% 8%;
+  --card: 0 0% 100%;
+  --card-foreground: 150 47% 8%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 150 47% 8%;
+  --primary: 150 47% 19%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 150 33% 26%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 150 20% 94%;
+  --muted-foreground: 150 15% 45%;
+  --accent: 43 72% 47%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 150 20% 88%;
+  --input: 150 20% 88%;
+  --ring: 150 47% 19%;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: 150 47% 6%;
+  --foreground: 0 0% 95%;
+  --card: 150 47% 8%;
+  --card-foreground: 0 0% 95%;
+  --popover: 150 47% 8%;
+  --popover-foreground: 0 0% 95%;
+  --primary: 150 33% 26%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 150 20% 18%;
+  --secondary-foreground: 0 0% 90%;
+  --muted: 150 20% 15%;
+  --muted-foreground: 150 15% 60%;
+  --accent: 43 72% 47%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62% 50%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 150 20% 20%;
+  --input: 150 20% 20%;
+  --ring: 150 33% 40%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-body, "Work Sans", sans-serif);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading, "Rajdhani", sans-serif);
+  font-weight: 700;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}

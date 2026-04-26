@@ -401,7 +401,7 @@ cross join lateral generate_series(r.check_in_date, r.check_out_date - interval 
 -- Daily occupancy summary across all room types
 create or replace view daily_occupancy as
 select
-  d.stay_date,
+  gs.stay_date::date as stay_date,
   rt.id as room_type_id,
   rt.name as room_type_name,
   coalesce(ri.total_rooms, rt.default_room_count) as total_rooms,
@@ -415,12 +415,12 @@ select
   coalesce(sum(d.adr * d.rooms_count), 0)::numeric(12,2) as room_revenue
 from room_types rt
 cross join generate_series(
-  (select min(check_in_date) from active_reservations),
-  (select max(check_out_date) from active_reservations),
+  coalesce((select min(check_in_date) from active_reservations), current_date),
+  coalesce((select max(check_out_date) from active_reservations), current_date),
   interval '1 day'
 ) as gs(stay_date)
-left join stay_nights d on d.stay_date = gs.stay_date and d.room_type_id = rt.id
-left join room_inventory ri on ri.date = gs.stay_date and ri.room_type_id = rt.id
+left join stay_nights d on d.stay_date = gs.stay_date::date and d.room_type_id = rt.id
+left join room_inventory ri on ri.date = gs.stay_date::date and ri.room_type_id = rt.id
 where rt.deleted_at is null
 group by gs.stay_date, rt.id, rt.name, rt.default_room_count, ri.total_rooms;
 

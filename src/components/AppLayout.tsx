@@ -9,6 +9,7 @@ import {
   HardDrive,
   LogOut,
 } from 'lucide-react'
+import { Toaster } from '@/components/ui/sonner'
 
 const navItems = [
   { to: '/calendar', label: 'Calendar', icon: CalendarDays },
@@ -69,6 +70,17 @@ export default function AppLayout() {
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
+
+      <Toaster
+        theme="dark"
+        toastOptions={{
+          classNames: {
+            toast: 'border-[#2D5A3D] bg-[#111d14] text-white',
+            success: 'border-[#1A472A]',
+            error: 'border-red-800',
+          },
+        }}
+      />
     </div>
   )
 }

@@ -10,7 +10,10 @@ import LoginPage from '@/pages/LoginPage'
 import CalendarPage from '@/pages/CalendarPage'
 import ReservationsPage from '@/pages/ReservationsPage'
 import ImportsPage from '@/pages/ImportsPage'
-import SettingsPage from '@/pages/SettingsPage'
+import SettingsPage from '@/features/settings/pages/SettingsPage'
+import { RoomTypesTab } from '@/features/settings/pages/RoomTypesTab'
+import { HotelInfoTab } from '@/features/settings/pages/HotelInfoTab'
+import { IntegrationsTab } from '@/features/settings/pages/IntegrationsTab'
 import BackupsPage from '@/pages/BackupsPage'
 
 const queryClient = new QueryClient({
@@ -35,7 +38,12 @@ createRoot(document.getElementById('root')!).render(
               <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/reservations" element={<ReservationsPage />} />
               <Route path="/imports" element={<ImportsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings" element={<SettingsPage />}>
+                <Route index element={<Navigate to="/settings/room-types" replace />} />
+                <Route path="room-types" element={<RoomTypesTab />} />
+                <Route path="hotel-info" element={<HotelInfoTab />} />
+                <Route path="integrations" element={<IntegrationsTab />} />
+              </Route>
               <Route path="/backups" element={<BackupsPage />} />
             </Route>
           </Route>

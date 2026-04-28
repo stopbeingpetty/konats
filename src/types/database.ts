@@ -32,7 +32,7 @@ export type ImportStatus = 'preview' | 'committed' | 'rolled_back'
 // Tables
 // ----------------------------------------------------------------------------
 
-export interface RoomType {
+export type RoomType = {
   id: string
   name: string
   code: string
@@ -44,7 +44,7 @@ export interface RoomType {
   deleted_at: string | null
 }
 
-export interface RoomInventory {
+export type RoomInventory = {
   id: string
   date: string
   room_type_id: string
@@ -55,7 +55,7 @@ export interface RoomInventory {
   updated_at: string
 }
 
-export interface Reservation {
+export type Reservation = {
   id: string
   source: ReservationSource
   phobs_reservation_id: string | null
@@ -86,7 +86,7 @@ export interface Reservation {
   deleted_at: string | null
 }
 
-export interface PriceChange {
+export type PriceChange = {
   id: string
   changed_at: string
   applied_for_date: string
@@ -100,7 +100,7 @@ export interface PriceChange {
   created_at: string
 }
 
-export interface Restriction {
+export type Restriction = {
   id: string
   date: string
   room_type_id: string
@@ -112,7 +112,7 @@ export interface Restriction {
   updated_at: string
 }
 
-export interface DemandMarker {
+export type DemandMarker = {
   id: string
   date_from: string
   date_to: string
@@ -125,7 +125,7 @@ export interface DemandMarker {
   deleted_at: string | null
 }
 
-export interface Import {
+export type Import = {
   id: string
   imported_at: string
   file_name: string
@@ -142,7 +142,7 @@ export interface Import {
   created_at: string
 }
 
-export interface Backup {
+export type Backup = {
   id: string
   created_at: string
   type: BackupType
@@ -152,7 +152,7 @@ export interface Backup {
   notes: string | null
 }
 
-export interface AuditLog {
+export type AuditLog = {
   id: string
   occurred_at: string
   table_name: string
@@ -171,7 +171,7 @@ export interface AuditLog {
 export type ActiveReservation = Reservation
 
 /** stay_nights — one row per night per reservation per room sold */
-export interface StayNight {
+export type StayNight = {
   reservation_id: string
   room_type_id: string
   channel: string
@@ -183,7 +183,7 @@ export interface StayNight {
 }
 
 /** daily_occupancy — aggregated per date per room type */
-export interface DailyOccupancy {
+export type DailyOccupancy = {
   stay_date: string
   room_type_id: string
   room_type_name: string
@@ -195,7 +195,7 @@ export interface DailyOccupancy {
 }
 
 /** adr_by_booked_date — aggregated by booking date */
-export interface AdrByBookedDate {
+export type AdrByBookedDate = {
   booked_date: string
   bookings_count: number
   room_nights: number
@@ -214,60 +214,73 @@ export interface Database {
         Row: RoomType
         Insert: Omit<RoomType, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<RoomType, 'id' | 'created_at'>>
+        Relationships: never[]
       }
       room_inventory: {
         Row: RoomInventory
         Insert: Omit<RoomInventory, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<RoomInventory, 'id' | 'created_at'>>
+        Relationships: never[]
       }
       reservations: {
         Row: Reservation
         Insert: Omit<Reservation, 'id' | 'nights' | 'booking_window' | 'adr' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<Reservation, 'id' | 'nights' | 'booking_window' | 'adr' | 'created_at'>>
+        Relationships: never[]
       }
       price_changes: {
         Row: PriceChange
         Insert: Omit<PriceChange, 'id' | 'created_at'>
         Update: Partial<Omit<PriceChange, 'id' | 'created_at'>>
+        Relationships: never[]
       }
       restrictions: {
         Row: Restriction
         Insert: Omit<Restriction, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<Restriction, 'id' | 'created_at'>>
+        Relationships: never[]
       }
       demand_markers: {
         Row: DemandMarker
         Insert: Omit<DemandMarker, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<DemandMarker, 'id' | 'created_at'>>
+        Relationships: never[]
       }
       imports: {
         Row: Import
         Insert: Omit<Import, 'id' | 'created_at'>
         Update: Partial<Omit<Import, 'id' | 'created_at'>>
+        Relationships: never[]
       }
       backups: {
         Row: Backup
         Insert: Omit<Backup, 'id' | 'created_at'>
         Update: Partial<Omit<Backup, 'id' | 'created_at'>>
+        Relationships: never[]
       }
       audit_log: {
         Row: AuditLog
         Insert: Omit<AuditLog, 'id' | 'occurred_at'>
         Update: never
+        Relationships: never[]
       }
     }
     Views: {
       active_reservations: {
         Row: ActiveReservation
+        Relationships: never[]
       }
       stay_nights: {
         Row: StayNight
+        Relationships: never[]
       }
       daily_occupancy: {
         Row: DailyOccupancy
+        Relationships: never[]
       }
       adr_by_booked_date: {
         Row: AdrByBookedDate
+        Relationships: never[]
       }
     }
     Functions: Record<string, never>

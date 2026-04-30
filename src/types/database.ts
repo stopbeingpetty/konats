@@ -55,6 +55,18 @@ export type RoomInventory = {
   updated_at: string
 }
 
+export type DailyOccupancyOverride = {
+  id: string
+  date: string
+  room_type_id: string
+  sold_rooms: number
+  capacity: number
+  source: string
+  notes: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export type Reservation = {
   id: string
   source: ReservationSource
@@ -220,6 +232,12 @@ export interface Database {
         Row: RoomInventory
         Insert: Omit<RoomInventory, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<RoomInventory, 'id' | 'created_at'>>
+        Relationships: never[]
+      }
+      daily_occupancy_override: {
+        Row: DailyOccupancyOverride
+        Insert: Omit<DailyOccupancyOverride, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<DailyOccupancyOverride, 'id' | 'created_at'>>
         Relationships: never[]
       }
       reservations: {

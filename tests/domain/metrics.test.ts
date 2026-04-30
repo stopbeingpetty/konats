@@ -412,18 +412,70 @@ describe('computeMonthKpis', () => {
       { totalRooms: 40, soldRooms: 30, freeRooms: 10, occupancyPct: 75, adr: 200, revpar: 150, roomRevenue: 6000 },
       { totalRooms: 40, soldRooms: 20, freeRooms: 20, occupancyPct: 50, adr: 200, revpar: 100, roomRevenue: 4000 },
     ]
+    // Both reservations use default dates: check_in=2025-06-10, check_out=2025-06-13 (3 calendar nights), rooms_count=1
     const reservations = [
       makeRes({ nights: 2, booking_window: 20 }),
       makeRes({ nights: 4, booking_window: 40 }),
     ]
     const result = computeMonthKpis(2025, 6, dailyMetrics, reservations, REF_DATE)
-    // totalSold = 50, totalAvailable = 80
+    // Occupancy: hybrid soldRooms from dailyMetrics (30+20=50), totalAvailable=80
     expect(result.occupancyPct).toBeCloseTo((50 / 80) * 100, 2)
     expect(result.totalRevenue).toBeCloseTo(10000, 2)
-    expect(result.adr).toBeCloseTo(10000 / 50, 2)
+    // ADR denominator: reservation room-nights (2 reservations × 3 calendar nights × 1 room = 6)
+    // NOT the override-inflated daily soldRooms (50)
+    expect(result.adr).toBeCloseTo(10000 / 6, 2)
     expect(result.revpar).toBeCloseTo(10000 / 80, 2)
     expect(result.alos).toBe(3)  // (2+4)/2
     expect(result.avgLeadTime).toBe(30)  // (20+40)/2
+  })
+
+  it('ADR denominator is reservation room-nights, not override-inflated daily soldRooms', () => {
+    // Simulate a day where override reports 30 sold rooms, but only 1 actual reservation
+    // (e.g. groups in override not yet in the reservations table).
+    // Revenue = reservation revenue only (1 room × 2 nights × €300).
+    const dailyMetrics = [
+      { totalRooms: 44, soldRooms: 30, freeRooms: 14, occupancyPct: 68.2, adr: 300, revpar: 204.5, roomRevenue: 300 },
+      { totalRooms: 44, soldRooms: 30, freeRooms: 14, occupancyPct: 68.2, adr: 300, revpar: 204.5, roomRevenue: 300 },
+    ]
+    const res = makeRes({ check_in_date: '2025-06-10', check_out_date: '2025-06-12', rooms_count: 1, adr: 300, nights: 2 })
+    const result = computeMonthKpis(2025, 6, dailyMetrics, [res], REF_DATE)
+    // resSoldRoomNights = 2 nights × 1 room = 2; totalRevenue = 600
+    // Correct ADR = 600 / 2 = 300
+    // Old (broken) formula would give: 600 / (30+30) = 10
+    expect(result.adr).toBeCloseTo(300, 2)
+  })
+
+  it('RevPAR uses total available capacity from dailyMetrics, not reservation room-nights', () => {
+    const dailyMetrics = [
+      { totalRooms: 44, soldRooms: 30, freeRooms: 14, occupancyPct: 68.2, adr: 300, revpar: 204.5, roomRevenue: 300 },
+      { totalRooms: 44, soldRooms: 30, freeRooms: 14, occupancyPct: 68.2, adr: 300, revpar: 204.5, roomRevenue: 300 },
+    ]
+    const res = makeRes({ check_in_date: '2025-06-10', check_out_date: '2025-06-12', rooms_count: 1, adr: 300, nights: 2 })
+    const result = computeMonthKpis(2025, 6, dailyMetrics, [res], REF_DATE)
+    // RevPAR = totalRevenue(600) / totalAvailable(88) — uses full override-aware capacity
+    expect(result.revpar).toBeCloseTo(600 / 88, 5)
+    // ADR ≠ RevPAR (they diverge whenever soldRooms < totalRooms)
+    expect(result.adr).not.toBeCloseTo(result.revpar, 2)
+  })
+
+  it('cross-month reservation: ADR denominator clips nights to the current month', () => {
+    // Reservation: May 28 → June 3 (6 total nights; 2 are in June: June 1 and June 2).
+    // Revenue captured in June dailyMetrics = 2 nights × 1 room × €400 = €800.
+    const crossMonthRes = makeRes({
+      check_in_date: '2025-05-28',
+      check_out_date: '2025-06-03',
+      rooms_count: 1,
+      adr: 400,
+      nights: 6,
+    })
+    const dailyMetrics = [
+      { totalRooms: 10, soldRooms: 1, freeRooms: 9, occupancyPct: 10, adr: 400, revpar: 40, roomRevenue: 400 },
+      { totalRooms: 10, soldRooms: 1, freeRooms: 9, occupancyPct: 10, adr: 400, revpar: 40, roomRevenue: 400 },
+    ]
+    const result = computeMonthKpis(2025, 6, dailyMetrics, [crossMonthRes], REF_DATE)
+    // resSoldRoomNights = 2 (June 1 + June 2 only), NOT 6 (full stay)
+    // ADR = 800 / 2 = 400
+    expect(result.adr).toBeCloseTo(400, 2)
   })
 
   it('computes all four pickup window values', () => {

@@ -1,70 +1,47 @@
 import { useMemo } from 'react'
 import { format, parseISO } from 'date-fns'
+import { X } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Sheet,
   SheetContent,
-  SheetHeader,
-  SheetTitle,
 } from '@/components/ui/sheet'
 import {
-  computeDayMetrics,
+  computeHybridDayMetrics,
   computePickup,
-  computeAvgLeadTimeForDate,
   type PickupWindowDays,
 } from '@/features/calendar/lib/metrics'
-import { useDayReservations } from '@/features/calendar/hooks/useDayDetail'
+import { useDayReservations, useDayOccupancyOverrides } from '@/features/calendar/hooks/useDayDetail'
 import type { Reservation, RoomInventory, RoomType } from '@/types/database'
 
 // ============================================================================
-// Formatting helpers (drawer-local)
+// Formatting helpers
 // ============================================================================
 
 function fmtEur(amount: number): string {
   return (
     '\u20ac\u00a0' +
     new Intl.NumberFormat('hr-HR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount)
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(Math.round(amount))
   )
-}
-
-function fmtDate(dateStr: string): string {
-  return format(parseISO(dateStr), 'EEEE, d MMMM yyyy')
-}
-
-function fmtShortDate(dateStr: string): string {
-  return format(parseISO(dateStr), 'dd.MM.yyyy')
 }
 
 function fmtPct(pct: number): string {
   return `${Math.round(pct)}%`
 }
 
-// ============================================================================
-// Channel mix
-// ============================================================================
-
-interface ChannelStat {
-  channel: string
-  count: number
-  pct: number
+function fmtDayOfWeek(dateStr: string): string {
+  return format(parseISO(dateStr), 'EEEE').toUpperCase()
 }
 
-function computeChannelMix(reservations: Reservation[]): ChannelStat[] {
-  const counts = new Map<string, number>()
-  for (const r of reservations) {
-    counts.set(r.channel, (counts.get(r.channel) ?? 0) + 1)
-  }
-  const total = reservations.length
-  return Array.from(counts.entries())
-    .map(([channel, count]) => ({
-      channel,
-      count,
-      pct: total > 0 ? (count / total) * 100 : 0,
-    }))
-    .sort((a, b) => b.count - a.count)
+function fmtDayAndMonth(dateStr: string): string {
+  return format(parseISO(dateStr), 'd MMMM yyyy')
+}
+
+function fmtShortDate(dateStr: string): string {
+  return format(parseISO(dateStr), 'dd.MM.yyyy')
 }
 
 // ============================================================================
@@ -76,7 +53,6 @@ interface DayDrawerProps {
   onClose: () => void
   /** YYYY-MM-DD */
   date: string
-  /** All active reservations in the displayed month (for pickup computation) */
   monthReservations: Reservation[]
   inventory: RoomInventory[]
   roomTypes: RoomType[]
@@ -88,7 +64,7 @@ interface DayDrawerProps {
 // ============================================================================
 
 const PICKUP_WINDOWS: PickupWindowDays[] = [1, 3, 7, 14]
-const PICKUP_LABELS: Record<PickupWindowDays, string> = { 1: '24h', 3: '3d', 7: '7d', 14: '14d' }
+const PICKUP_LABELS: Record<PickupWindowDays, string> = { 1: '24H', 3: '3D', 7: '7D', 14: '14D' }
 
 export function DayDrawer({
   open,
@@ -99,29 +75,28 @@ export function DayDrawer({
   roomTypes,
   selectedRoomTypeId,
 }: DayDrawerProps) {
-  const { data: dayReservations = [], isLoading } = useDayReservations(open ? date : null)
+  const { data: dayReservations = [], isLoading: resLoading } = useDayReservations(open ? date : null)
+  const { data: dayOverrides = [], isLoading: ovLoading } = useDayOccupancyOverrides(open ? date : null)
+  const isLoading = resLoading || ovLoading
 
   const filteredRoomTypes = selectedRoomTypeId
     ? roomTypes.filter((rt) => rt.id === selectedRoomTypeId)
     : roomTypes
 
-  // Day-level aggregate metrics
   const dayMetrics = useMemo(
-    () => computeDayMetrics(date, dayReservations, filteredRoomTypes, inventory),
-    [date, dayReservations, filteredRoomTypes, inventory]
+    () => computeHybridDayMetrics(date, dayReservations, filteredRoomTypes, inventory, dayOverrides),
+    [date, dayReservations, filteredRoomTypes, inventory, dayOverrides]
   )
 
-  // Per-room-type metrics
   const perTypeMetrics = useMemo(
     () =>
       filteredRoomTypes.map((rt) => ({
         rt,
-        metrics: computeDayMetrics(date, dayReservations, [rt], inventory),
+        metrics: computeHybridDayMetrics(date, dayReservations, [rt], inventory, dayOverrides),
       })),
-    [date, dayReservations, filteredRoomTypes, inventory]
+    [date, dayReservations, filteredRoomTypes, inventory, dayOverrides]
   )
 
-  // Pickup counts — computed from month reservations (no extra fetch)
   const refDate = useMemo(() => new Date(), [])
   const pickupCounts = useMemo(
     () =>
@@ -135,149 +110,165 @@ export function DayDrawer({
     [date, monthReservations, refDate]
   )
 
-  const avgLeadTime = useMemo(
-    () => computeAvgLeadTimeForDate(date, dayReservations),
-    [date, dayReservations]
-  )
-
-  const channelMix = useMemo(() => computeChannelMix(dayReservations), [dayReservations])
+  const allPickupZero = PICKUP_WINDOWS.every((w) => pickupCounts[w] === 0)
 
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent
         side="right"
-        className="w-[min(560px,95vw)] max-w-none overflow-y-auto border-[#2D5A3D] bg-[#0d1a10] p-0 text-white"
+        className="w-[min(480px,100vw)] max-w-none overflow-y-auto border-l border-[#D8DEDE] bg-[#F0F4F4] p-0 text-[#1A1A1A] shadow-none"
       >
-        <SheetHeader className="border-b border-[#2D5A3D] px-5 py-4">
-          <SheetTitle className="font-['Rajdhani'] text-xl font-bold text-white">
-            {fmtDate(date)}
-          </SheetTitle>
-        </SheetHeader>
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <div className="relative border-b border-[#D8DEDE] px-8 pb-6 pt-8">
+          <button
+            onClick={onClose}
+            className="absolute right-6 top-6 text-[rgba(26,26,26,0.5)] transition-colors hover:text-[#1A1A1A]"
+            aria-label="Close"
+          >
+            <X className="h-[18px] w-[18px]" />
+          </button>
 
-        <div className="space-y-5 px-5 py-4">
-          {/* KPI strip */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <KpiCard label="Occupancy" value={fmtPct(dayMetrics.occupancyPct)} />
-            <KpiCard label="ADR" value={fmtEur(dayMetrics.adr)} />
-            <KpiCard label="RevPAR" value={fmtEur(dayMetrics.revpar)} />
-            <KpiCard label="Revenue" value={fmtEur(dayMetrics.roomRevenue)} />
+          <div
+            className="font-display text-[28px] font-bold leading-none text-[#1A1A1A]"
+            style={{ letterSpacing: '-0.01em' }}
+          >
+            {fmtDayOfWeek(date)}
+          </div>
+          <div
+            className="mt-0.5 font-display text-[28px] font-light leading-none text-[#1A1A1A]"
+            style={{ letterSpacing: '-0.01em' }}
+          >
+            {fmtDayAndMonth(date)}
+          </div>
+        </div>
+
+        <div className="px-8">
+          {/* ── KPI strip ─────────────────────────────────────────────────── */}
+          <div className="border-b border-[#D8DEDE] py-6">
+            <div className="grid grid-cols-4" style={{ gap: '24px' }}>
+              <DrawerKpi label="OCCUPANCY" value={fmtPct(dayMetrics.occupancyPct)} />
+              <DrawerKpi label="ADR" value={fmtEur(dayMetrics.adr)} />
+              <DrawerKpi label="REVPAR" value={fmtEur(dayMetrics.revpar)} />
+              <DrawerKpi label="REVENUE" value={fmtEur(dayMetrics.roomRevenue)} />
+            </div>
           </div>
 
           {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-32 bg-[#1a2f20]" />
-              <Skeleton className="h-24 bg-[#1a2f20]" />
+            <div className="space-y-4 py-6">
+              <Skeleton className="h-24 bg-[#D8DEDE]" />
+              <Skeleton className="h-16 bg-[#D8DEDE]" />
             </div>
           ) : (
             <>
-              {/* Per room type breakdown */}
+              {/* ── By Room Type ─────────────────────────────────────────── */}
               {filteredRoomTypes.length > 1 && (
-                <Section title="By Room Type">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-[#2D5A3D] text-left text-[11px] uppercase tracking-wider text-gray-500">
-                        <th className="pb-1.5">Type</th>
-                        <th className="pb-1.5 text-right">Occ</th>
-                        <th className="pb-1.5 text-right">ADR</th>
-                        <th className="pb-1.5 text-right">Revenue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {perTypeMetrics.map(({ rt, metrics: m }) => (
-                        <tr key={rt.id} className="border-b border-[#1a2a1f] last:border-0">
-                          <td className="py-1.5 text-gray-300">{rt.name}</td>
-                          <td className="py-1.5 text-right text-gray-300">{fmtPct(m.occupancyPct)}</td>
-                          <td className="py-1.5 text-right text-gray-300">{fmtEur(m.adr)}</td>
-                          <td className="py-1.5 text-right text-gray-300">{fmtEur(m.roomRevenue)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </Section>
+                <div className="border-b border-[#D8DEDE] py-6">
+                  <SectionLabel>BY ROOM TYPE</SectionLabel>
+                  <div className="mt-3">
+                    <div className="mb-2 grid grid-cols-4">
+                      <ColHeader>Type</ColHeader>
+                      <ColHeader align="right">Occ</ColHeader>
+                      <ColHeader align="right">ADR</ColHeader>
+                      <ColHeader align="right">Revenue</ColHeader>
+                    </div>
+                    {perTypeMetrics.map(({ rt, metrics: m }) => (
+                      <div
+                        key={rt.id}
+                        className="grid h-9 grid-cols-4 items-center border-t border-[#D8DEDE]"
+                      >
+                        <span className="font-display text-[14px] font-medium text-[#1A1A1A]">
+                          {rt.name}
+                        </span>
+                        <span className="text-right font-sans text-[13px] tabular-nums text-[rgba(26,26,26,0.7)]">
+                          {fmtPct(m.occupancyPct)}
+                        </span>
+                        <span
+                          className="text-right font-display text-[13px] font-bold tabular-nums text-[#C9A227]"
+                          style={{ letterSpacing: '-0.01em', fontFeatureSettings: "'tnum'" }}
+                        >
+                          {fmtEur(m.adr)}
+                        </span>
+                        <span className="text-right font-sans text-[13px] tabular-nums text-[rgba(26,26,26,0.7)]">
+                          {fmtEur(m.roomRevenue)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
 
-              {/* Pickup */}
-              <Section title="Pickup — New Bookings">
-                <div className="grid grid-cols-4 gap-2">
+              {/* ── Pickup ───────────────────────────────────────────────── */}
+              <div className="border-b border-[#D8DEDE] py-6">
+                <SectionLabel>PICKUP — NEW BOOKINGS</SectionLabel>
+                <div className="mt-3 grid grid-cols-4">
                   {PICKUP_WINDOWS.map((w) => (
-                    <div key={w} className="rounded bg-[#1a2f20] p-2 text-center">
-                      <div className="text-[11px] uppercase tracking-wider text-gray-500">
+                    <div key={w} className={allPickupZero ? 'opacity-30' : ''}>
+                      <div
+                        className="font-sans text-[9px] uppercase text-[rgba(26,26,26,0.45)]"
+                        style={{ letterSpacing: '0.18em' }}
+                      >
                         {PICKUP_LABELS[w]}
                       </div>
-                      <div className="mt-0.5 text-lg font-bold text-white">{pickupCounts[w]}</div>
+                      <div
+                        className="mt-1 font-display text-[20px] font-bold tabular-nums text-[#1A1A1A]"
+                        style={{ letterSpacing: '-0.01em', fontFeatureSettings: "'tnum'" }}
+                      >
+                        {pickupCounts[w]}
+                      </div>
                     </div>
                   ))}
                 </div>
-              </Section>
+                {allPickupZero && (
+                  <p className="mt-3 font-sans text-[11px] text-[rgba(26,26,26,0.4)]">
+                    — no pickup signal yet. Available once future bookings are tracked.
+                  </p>
+                )}
+              </div>
 
-              {/* Lead time */}
-              <Section title="Avg Lead Time">
-                <p className="text-lg font-medium text-gray-200">
-                  {Math.round(avgLeadTime)} days
-                </p>
-              </Section>
-
-              {/* Channel mix */}
-              {channelMix.length > 0 && (
-                <Section title="Channel Mix">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-[#2D5A3D] text-left text-[11px] uppercase tracking-wider text-gray-500">
-                        <th className="pb-1.5">Channel</th>
-                        <th className="pb-1.5 text-right">Bookings</th>
-                        <th className="pb-1.5 text-right">%</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {channelMix.map((c) => (
-                        <tr key={c.channel} className="border-b border-[#1a2a1f] last:border-0">
-                          <td className="py-1.5 text-gray-300">{c.channel}</td>
-                          <td className="py-1.5 text-right text-gray-300">{c.count}</td>
-                          <td className="py-1.5 text-right text-gray-400">{Math.round(c.pct)}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </Section>
-              )}
-
-              {/* Reservations list */}
-              <Section title={`Reservations (${dayReservations.length})`}>
+              {/* ── Reservations ─────────────────────────────────────────── */}
+              <div className="py-6">
+                <SectionLabel>RESERVATIONS ({dayReservations.length})</SectionLabel>
                 {dayReservations.length === 0 ? (
-                  <p className="text-sm text-gray-500">No active reservations for this date.</p>
+                  <p className="mt-3 font-sans text-[13px] text-[rgba(26,26,26,0.45)]">
+                    No active reservations for this date.
+                  </p>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="mt-3">
                     {dayReservations.map((r) => {
                       const roomTypeName =
                         roomTypes.find((rt) => rt.id === r.room_type_id)?.name ?? r.room_type_id
                       return (
                         <div
                           key={r.id}
-                          className="rounded border border-[#2D5A3D]/50 bg-[#111d14] px-3 py-2 text-sm"
+                          className="flex items-center justify-between border-t border-[#D8DEDE] py-[14px]"
                         >
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <span className="font-medium text-white">
-                                {r.guest_name ?? 'Guest'}
-                              </span>
-                              <span className="ml-2 text-xs text-gray-500">{roomTypeName}</span>
+                          <div>
+                            <div className="font-display text-[15px] font-medium text-[#1A1A1A]">
+                              {r.guest_name ?? 'Guest'}
                             </div>
-                            <span className="font-medium text-[#C9A227]">{fmtEur(r.adr)}</span>
+                            <div className="mt-0.5 font-sans text-[11px] text-[rgba(26,26,26,0.5)]">
+                              {roomTypeName}
+                              <span className="mx-1.5">·</span>
+                              {fmtShortDate(r.check_in_date)} – {fmtShortDate(r.check_out_date)}
+                              <span className="mx-1.5">·</span>
+                              {r.channel}
+                              {r.rooms_count > 1 && (
+                                <span className="ml-1">× {r.rooms_count} rooms</span>
+                              )}
+                            </div>
                           </div>
-                          <div className="mt-0.5 text-xs text-gray-500">
-                            {fmtShortDate(r.check_in_date)} – {fmtShortDate(r.check_out_date)}
-                            <span className="mx-1.5">·</span>
-                            {r.channel}
-                            {r.rooms_count > 1 && (
-                              <span className="ml-1.5 text-gray-600">× {r.rooms_count} rooms</span>
-                            )}
-                          </div>
+                          <span
+                            className="ml-4 font-display text-[16px] font-bold tabular-nums text-[#C9A227]"
+                            style={{ letterSpacing: '-0.01em', fontFeatureSettings: "'tnum'" }}
+                          >
+                            {fmtEur(r.adr)}
+                          </span>
                         </div>
                       )
                     })}
                   </div>
                 )}
-              </Section>
+              </div>
             </>
           )}
         </div>
@@ -290,21 +281,42 @@ export function DayDrawer({
 // Sub-components
 // ============================================================================
 
-function KpiCard({ label, value }: { label: string; value: string }) {
+function DrawerKpi({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-[#2D5A3D]/50 bg-[#111d14] px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className="mt-0.5 font-medium text-white">{value}</div>
+    <div>
+      <div
+        className="font-sans text-[9px] uppercase text-[rgba(26,26,26,0.4)]"
+        style={{ letterSpacing: '0.18em' }}
+      >
+        {label}
+      </div>
+      <div
+        className="mt-1 font-display text-[22px] font-bold leading-none tabular-nums text-[#1A1A1A]"
+        style={{ letterSpacing: '-0.01em', fontFeatureSettings: "'tnum'" }}
+      >
+        {value}
+      </div>
     </div>
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-        {title}
-      </h3>
+    <div
+      className="font-sans text-[9px] uppercase text-[rgba(26,26,26,0.4)]"
+      style={{ letterSpacing: '0.18em' }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function ColHeader({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <div
+      className={`font-sans text-[9px] uppercase text-[rgba(26,26,26,0.4)] ${align === 'right' ? 'text-right' : ''}`}
+      style={{ letterSpacing: '0.18em' }}
+    >
       {children}
     </div>
   )

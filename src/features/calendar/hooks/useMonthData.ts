@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { format, endOfMonth } from 'date-fns'
 import { supabase } from '@/lib/supabase/client'
-import type { Reservation, RoomInventory, DemandMarker, Restriction } from '@/types/database'
+import type { Reservation, RoomInventory, DemandMarker, Restriction, DailyOccupancyOverride } from '@/types/database'
 
 // ============================================================================
 // Internal helpers
@@ -103,6 +103,29 @@ export function useMonthRestrictions(year: number, month: number) {
     queryFn: async (): Promise<Restriction[]> => {
       const { data, error } = await supabase
         .from('restrictions')
+        .select('*')
+        .gte('date', startDate)
+        .lte('date', endDate)
+
+      if (error) throw new Error(error.message)
+      return data
+    },
+  })
+}
+
+/**
+ * Occupancy overrides for every day in the requested month.
+ * When a (date, room_type_id) row exists here, sold_rooms from this table
+ * overrides the reservation-derived count in metric calculations.
+ */
+export function useMonthOccupancyOverrides(year: number, month: number) {
+  const { startDate, endDate } = monthRange(year, month)
+
+  return useQuery({
+    queryKey: ['calendar', 'occupancyOverrides', year, month],
+    queryFn: async (): Promise<DailyOccupancyOverride[]> => {
+      const { data, error } = await supabase
+        .from('daily_occupancy_override')
         .select('*')
         .gte('date', startDate)
         .lte('date', endDate)

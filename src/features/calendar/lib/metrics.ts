@@ -34,6 +34,19 @@ export interface MetricsInventoryRow {
   total_rooms: number
 }
 
+export interface MetricsOccupancyOverride {
+  /** YYYY-MM-DD */
+  date: string
+  room_type_id: string
+  sold_rooms: number
+  capacity: number
+}
+
+export interface MetricsReservationCount {
+  room_type_id: string
+  sold_rooms: number
+}
+
 // ============================================================================
 // Output types
 // ============================================================================
@@ -67,6 +80,36 @@ export interface MonthKpis {
 export type PickupWindowDays = 1 | 3 | 7 | 14
 
 // ============================================================================
+// Occupancy source resolution
+// ============================================================================
+
+/**
+ * Returns the effective sold room count for a given date + room type.
+ * Prefers override data when a matching row exists in overrideRows;
+ * falls back to the pre-computed reservation-derived counts otherwise.
+ *
+ * @param date          YYYY-MM-DD
+ * @param roomTypeId    UUID of the room type
+ * @param overrideRows  Rows from daily_occupancy_override for the relevant period
+ * @param reservationCounts  Reservation-derived sold counts for all room types on this date
+ */
+export function getEffectiveOccupancy(
+  date: string,
+  roomTypeId: string,
+  overrideRows: MetricsOccupancyOverride[],
+  reservationCounts: MetricsReservationCount[]
+): { soldRooms: number; capacity: number | null; fromOverride: boolean } {
+  const override = overrideRows.find(
+    (o) => o.date === date && o.room_type_id === roomTypeId
+  )
+  if (override !== undefined) {
+    return { soldRooms: override.sold_rooms, capacity: override.capacity, fromOverride: true }
+  }
+  const fallback = reservationCounts.find((c) => c.room_type_id === roomTypeId)
+  return { soldRooms: fallback?.sold_rooms ?? 0, capacity: null, fromOverride: false }
+}
+
+// ============================================================================
 // Internal helpers
 // ============================================================================
 
@@ -89,6 +132,73 @@ function availableRoomsForDate(
 // ============================================================================
 // Core metric functions
 // ============================================================================
+
+/**
+ * Compute day metrics with daily_occupancy_override support.
+ *
+ * For each room type:
+ *   - sold count: from override row when present, else from reservations
+ *   - capacity:   from override.capacity when present, else from inventory/default
+ *
+ * Revenue and ADR denominator always come from reservations — override affects
+ * counts only, not rate data.  RevPAR = (effective_sold × ADR) / effective_capacity,
+ * which equals ADR × occupancy%.
+ *
+ * When overrides is empty this produces identical results to computeDayMetrics.
+ */
+export function computeHybridDayMetrics(
+  date: string,
+  reservations: MetricsReservation[],
+  roomTypes: MetricsRoomType[],
+  inventory: MetricsInventoryRow[] = [],
+  overrides: MetricsOccupancyOverride[] = []
+): DayMetrics {
+  const roomTypeIds = new Set(roomTypes.map((rt) => rt.id))
+  const staying = reservations.filter(
+    (r) =>
+      r.check_in_date <= date &&
+      r.check_out_date > date &&
+      roomTypeIds.has(r.room_type_id)
+  )
+
+  // Revenue always from reservations (scoped to the requested room types)
+  const roomRevenue = staying.reduce((sum, r) => sum + r.adr * r.rooms_count, 0)
+  // ADR denominator: reservation-based sold rooms (not override count)
+  const resSoldTotal = staying.reduce((sum, r) => sum + r.rooms_count, 0)
+
+  let totalRooms = 0
+  let soldRooms = 0
+
+  for (const rt of roomTypes) {
+    const override = overrides.find((o) => o.date === date && o.room_type_id === rt.id)
+
+    if (override !== undefined) {
+      totalRooms += override.capacity
+      soldRooms += override.sold_rooms
+    } else {
+      const inv = inventory.find((i) => i.date === date && i.room_type_id === rt.id)
+      totalRooms += inv !== undefined ? inv.total_rooms : rt.default_room_count
+      soldRooms += staying
+        .filter((r) => r.room_type_id === rt.id)
+        .reduce((sum, r) => sum + r.rooms_count, 0)
+    }
+  }
+
+  const adr = resSoldTotal > 0 ? roomRevenue / resSoldTotal : 0
+  const occupancyPct = totalRooms > 0 ? (soldRooms / totalRooms) * 100 : 0
+  // RevPAR = ADR × occupancy% (spec: override_sold × ADR / override_capacity)
+  const revpar = totalRooms > 0 ? (soldRooms * adr) / totalRooms : 0
+
+  return {
+    totalRooms,
+    soldRooms,
+    freeRooms: Math.max(0, totalRooms - soldRooms),
+    occupancyPct,
+    adr,
+    revpar,
+    roomRevenue,
+  }
+}
 
 /**
  * Compute day metrics from raw data.
@@ -242,6 +352,18 @@ export function computeAvgLeadTime(reservations: MetricsReservation[]): number {
  * Compute all month-level KPIs from per-day metrics + raw reservations.
  * dailyMetrics: array of DayMetrics for each day in the month (from computeDayMetrics or aggregateDayRows).
  * reservations: active reservations with stay in the month.
+ *
+ * ADR uses reservation room-nights as denominator (not override-inflated dailyMetrics.soldRooms).
+ * Override data inflates sold counts for occupancy/RevPAR purposes (it includes groups and
+ * pre-arrival stays not yet in the reservations table), so using it as an ADR denominator
+ * produces artificially low ADR values. Revenue always comes from reservations only, so the
+ * denominator must also be reservation-based to produce a meaningful average rate.
+ *
+ * Cross-month reservations are clipped to the month boundary so a 10-night stay that overlaps
+ * by 2 nights contributes only 2 room-nights to the denominator.
+ *
+ * RevPAR uses total capacity (override-aware) so it correctly reflects utilisation of all rooms.
+ * Occupancy % is unchanged — it uses the hybrid (override-aware) sold count.
  */
 export function computeMonthKpis(
   year: number,
@@ -255,7 +377,20 @@ export function computeMonthKpis(
   const totalRevenue = dailyMetrics.reduce((s, d) => s + d.roomRevenue, 0)
 
   const occupancyPct = totalAvailable > 0 ? (totalSold / totalAvailable) * 100 : 0
-  const adr = totalSold > 0 ? totalRevenue / totalSold : 0
+
+  // ADR denominator: reservation room-nights clipped to this month (not override-inflated sold).
+  const monthStartStr = format(new Date(year, month - 1, 1), 'yyyy-MM-dd')
+  const monthEndExclusive = format(new Date(year, month, 1), 'yyyy-MM-dd')
+  let resSoldRoomNights = 0
+  for (const r of reservations) {
+    if (r.check_in_date >= monthEndExclusive || r.check_out_date <= monthStartStr) continue
+    const effIn = r.check_in_date > monthStartStr ? r.check_in_date : monthStartStr
+    const effOut = r.check_out_date < monthEndExclusive ? r.check_out_date : monthEndExclusive
+    resSoldRoomNights +=
+      ((new Date(effOut).getTime() - new Date(effIn).getTime()) / 86400000) * r.rooms_count
+  }
+
+  const adr = resSoldRoomNights > 0 ? totalRevenue / resSoldRoomNights : 0
   const revpar = totalAvailable > 0 ? totalRevenue / totalAvailable : 0
 
   const pickup: Record<PickupWindowDays, number> = {

@@ -1,4 +1,38 @@
-@import url("https://fonts.googleapis.com/css2?family=Rajdhani:wght@700&family=Work+Sans:ital,wght@0,300..700;1,300..700&display=swap");
+/* ── Inter Display (optical size 14–32 for UI labels) ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap');
+
+/* ── Geist Sans from jsDelivr CDN ── */
+@font-face {
+  font-family: 'Geist';
+  src: url('https://cdn.jsdelivr.net/npm/geist@1.4.0/dist/fonts/geist-sans/Geist-Light.woff2') format('woff2');
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('https://cdn.jsdelivr.net/npm/geist@1.4.0/dist/fonts/geist-sans/Geist-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('https://cdn.jsdelivr.net/npm/geist@1.4.0/dist/fonts/geist-sans/Geist-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('https://cdn.jsdelivr.net/npm/geist@1.4.0/dist/fonts/geist-sans/Geist-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('https://cdn.jsdelivr.net/npm/geist@1.4.0/dist/fonts/geist-sans/Geist-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
 @import "tailwindcss";
 
 @theme {
@@ -6,8 +40,12 @@
   --color-brand-green-mid: #2d5a3d;
   --color-brand-gold: #c9a227;
 
-  --font-heading: "Rajdhani", sans-serif;
-  --font-body: "Work Sans", sans-serif;
+  /* font-display → Geist: numbers, big values, headings, wordmark */
+  --font-display: 'Geist', system-ui, sans-serif;
+  /* font-heading → alias for Geist (used by settings pages) */
+  --font-heading: 'Geist', system-ui, sans-serif;
+  /* font-sans → Inter: labels, body, UI text */
+  --font-sans: 'Inter', system-ui, sans-serif;
 }
 
 :root {
@@ -31,6 +69,26 @@
   --input: 150 20% 88%;
   --ring: 150 47% 19%;
   --radius: 0.5rem;
+
+  /* Design tokens — teal palette */
+  --bg-canvas: #E8EEEE;
+  --bg-surface: #FFFFFF;
+  --bg-sidebar: #0F3D3E;
+  --text-primary: #1A1A1A;
+  --text-on-dark: #F0F4F4;
+  --text-secondary: rgba(26,26,26,0.65);
+  --text-muted: rgba(26,26,26,0.45);
+  --border-hairline: #C8D2D2;
+  --border-strong: #BFC8C8;
+  --brand-green: #1A472A;
+  --brand-gold: #C9A227;
+  --brand-teal: #0F3D3E;
+  --brand-teal-soft: rgba(15,61,62,0.12);
+  --heatmap-0-30: #E5DCC5;
+  --heatmap-31-60: #B8C9C0;
+  --heatmap-61-85: rgba(15,61,62,0.65);
+  --heatmap-86-99: #0F3D3E;
+  --heatmap-100: #C9A227;
 }
 
 .dark {
@@ -60,9 +118,9 @@
 }
 
 body {
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family: var(--font-body, "Work Sans", sans-serif);
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans, 'Inter', sans-serif);
   margin: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -74,7 +132,7 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: var(--font-heading, "Rajdhani", sans-serif);
+  font-family: var(--font-display, 'Geist', sans-serif);
   font-weight: 700;
 }
 

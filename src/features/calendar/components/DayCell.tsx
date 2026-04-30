@@ -1,9 +1,9 @@
-import { isToday, isWeekend, isSameMonth } from 'date-fns'
-import { Lock } from 'lucide-react'
+import { isToday, isSameMonth } from 'date-fns'
 import { cn } from '@/lib/utils'
-import type { DemandLevel, RoomInventory, RoomType } from '@/types/database'
+import type { DailyOccupancyOverride, DemandLevel, RoomInventory, RoomType } from '@/types/database'
 import type { Reservation } from '@/types/database'
-import { computeDayMetrics } from '@/features/calendar/lib/metrics'
+import type { CalendarViewMode } from '@/features/calendar/pages/CalendarPage'
+import { computeHybridDayMetrics } from '@/features/calendar/lib/metrics'
 
 // ============================================================================
 // Utilities
@@ -11,7 +11,7 @@ import { computeDayMetrics } from '@/features/calendar/lib/metrics'
 
 function formatEur(amount: number): string {
   return (
-    '\u20ac\u00a0' +
+    '\u20ac' +
     new Intl.NumberFormat('hr-HR', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
@@ -19,29 +19,18 @@ function formatEur(amount: number): string {
   )
 }
 
-function occupancyTextColor(pct: number): string {
-  if (pct >= 90) return 'text-[#C9A227]'
-  if (pct >= 70) return 'text-green-400'
-  if (pct >= 40) return 'text-amber-400'
-  if (pct > 0) return 'text-red-400'
-  return 'text-gray-500'
-}
-
-function cellBorderColor(pct: number): string {
-  if (pct >= 90) return 'border-[#C9A227]/40'
-  if (pct >= 70) return 'border-green-700/40'
-  if (pct >= 40) return 'border-amber-700/40'
-  if (pct > 0) return 'border-red-800/40'
-  return 'border-[#2D5A3D]/30'
-}
-
-function demandDotColor(level: DemandLevel): string {
-  switch (level) {
-    case 'peak': return 'bg-[#C9A227]'
-    case 'high': return 'bg-red-500'
-    case 'normal': return 'bg-blue-400'
-    case 'low': return 'bg-gray-500'
-  }
+/**
+ * Bar color based on barPct (0–100 scale).
+ * Occupancy mode: barPct == occupancyPct.
+ * ADR mode: barPct == (adr / monthMaxAdr) * 100.
+ */
+function heatmapBarColor(barPct: number): string {
+  if (barPct <= 0) return 'transparent'
+  if (barPct >= 100) return '#C9A227'
+  if (barPct >= 86) return '#0F3D3E'
+  if (barPct >= 61) return 'rgba(15,61,62,0.65)'
+  if (barPct >= 31) return '#B8C9C0'
+  return '#E5DCC5'
 }
 
 // ============================================================================
@@ -55,8 +44,11 @@ interface DayCellProps {
   inventory: RoomInventory[]
   roomTypes: RoomType[]
   selectedRoomTypeId: string | null
+  occupancyOverrides: DailyOccupancyOverride[]
   demandLevel: DemandLevel | null
   hasRestriction: boolean
+  viewMode: CalendarViewMode
+  monthMaxAdr: number
   onClick: () => void
 }
 
@@ -71,13 +63,17 @@ export function DayCell({
   inventory,
   roomTypes,
   selectedRoomTypeId,
+  occupancyOverrides,
   demandLevel,
   hasRestriction,
+  viewMode,
+  monthMaxAdr,
   onClick,
 }: DayCellProps) {
   const inCurrentMonth = isSameMonth(date, currentMonthDate)
   const today = isToday(date)
-  const weekend = isWeekend(date)
+  // Hotel weekend convention: Friday (5) + Saturday (6), not Sat + Sun
+  const isFriSat = date.getDay() === 5 || date.getDay() === 6
 
   const dateStr = [
     date.getFullYear(),
@@ -85,89 +81,142 @@ export function DayCell({
     String(date.getDate()).padStart(2, '0'),
   ].join('-')
 
+  // ── Metrics ──────────────────────────────────────────────────────────────
   const filteredRoomTypes = selectedRoomTypeId
     ? roomTypes.filter((rt) => rt.id === selectedRoomTypeId)
     : roomTypes
 
-  const metrics = computeDayMetrics(
+  const metrics = computeHybridDayMetrics(
     dateStr,
     reservations,
     filteredRoomTypes,
-    inventory
+    inventory,
+    occupancyOverrides
   )
 
   const { occupancyPct, soldRooms, totalRooms, adr } = metrics
   const displayOcc = Math.round(occupancyPct)
+  const dayNum = date.getDate()
 
-  if (!inCurrentMonth) {
-    return (
-      <div className="min-h-[80px] rounded border border-[#1a2a1f]/40 p-1.5 opacity-25">
-        <span className="text-xs text-gray-600">{date.getDate()}</span>
-      </div>
-    )
-  }
+  // ── Bar logic: ADR-relative in ADR mode, occupancy in occupancy mode ─────
+  const barPct =
+    viewMode === 'adr' && monthMaxAdr > 0
+      ? (adr / monthMaxAdr) * 100
+      : occupancyPct
+  const barWidth = barPct <= 0 ? 0 : Math.max(6, Math.round((barPct / 100) * 24))
+  const barColor = heatmapBarColor(barPct)
+
+  // ── isPeak only for current-month cells (no gold on overflow days) ────────
+  const isPeak = inCurrentMonth && occupancyPct >= 100
+
+  // ── Big number is ALWAYS occupancy ───────────────────────────────────────
+  const bigNumber = totalRooms > 0 ? `${displayOcc}%` : '—'
+
+  // ── Subtitle: ADR tab foregrounds ADR value, Occ tab foregrounds rooms ────
+  const subtitle =
+    viewMode === 'adr'
+      ? totalRooms > 0
+        ? adr > 0
+          ? `${formatEur(adr)} · ${soldRooms}/${totalRooms}`
+          : `${soldRooms}/${totalRooms}`
+        : '—'
+      : totalRooms > 0
+        ? adr > 0
+          ? `${soldRooms}/${totalRooms} · ${formatEur(adr)}`
+          : `${soldRooms}/${totalRooms}`
+        : '—'
+
+  // ── Fri/Sat: 1px gold left border only — no bg tint ─────────────────────
+  const cellBg = '#FFFFFF'
+  // Skip left-border indicator on today cells — today ring takes precedence
+  const cellBorderLeft =
+    isFriSat && !today ? '1px solid rgba(201,162,39,0.45)' : undefined
 
   return (
     <button
       onClick={onClick}
       className={cn(
-        'relative min-h-[80px] w-full rounded border p-1.5 text-left transition-colors',
-        'hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A227]/50',
-        today ? 'ring-1 ring-[#C9A227]/60' : '',
-        weekend ? 'bg-[#0f1f15]/60' : 'bg-[#0d1a10]/40',
-        cellBorderColor(occupancyPct)
+        'relative min-h-[110px] w-full p-[14px] text-left',
+        'transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#C9A227]/40',
+        today ? 'ring-2 ring-inset ring-[#C9A227]' : ''
       )}
+      style={{
+        fontFeatureSettings: "'tnum'",
+        backgroundColor: cellBg,
+        border: '1px solid #D8DEDE',
+        borderLeft: cellBorderLeft ?? '1px solid #D8DEDE',
+        opacity: inCurrentMonth ? undefined : 0.35,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.backgroundColor = 'rgba(201,162,39,0.04)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = cellBg
+      }}
     >
-      {/* Restriction icon — top left */}
-      {hasRestriction && (
-        <Lock className="absolute left-1.5 top-1.5 h-2.5 w-2.5 text-amber-400" />
+
+      {/* Demand / restriction dot — top-left, 14px inset */}
+      {(demandLevel !== null || hasRestriction) && (
+        <div className="absolute left-[14px] top-[14px] flex flex-col gap-1">
+          {hasRestriction && (
+            <span
+              className="block h-[5px] w-[5px] rounded-full"
+              style={{ backgroundColor: 'rgba(180,60,60,0.7)' }}
+            />
+          )}
+          {demandLevel !== null && (
+            <span className="block h-[5px] w-[5px] rounded-full bg-[#1A1A1A]" />
+          )}
+        </div>
       )}
 
-      {/* Day number */}
-      <div
-        className={cn(
-          'mb-0.5 text-right text-xs font-medium leading-none',
-          hasRestriction ? 'pr-0 pl-4' : '',
-          today ? 'text-[#C9A227]' : 'text-gray-400'
-        )}
-      >
-        {date.getDate()}
-        {/* Demand dot — top right */}
-        {demandLevel !== null && (
+      {/* Day number — top-right */}
+      <div className="absolute right-[14px] top-[14px]">
+        {today ? (
           <span
-            className={cn(
-              'ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle',
-              demandDotColor(demandLevel)
-            )}
+            className="inline-block rounded-md bg-[#C9A227] font-display text-[14px] font-bold leading-none text-white"
+            style={{ padding: '2px 4px' }}
+          >
+            {dayNum}
+          </span>
+        ) : isPeak ? (
+          <span className="font-display text-[16px] font-light leading-none text-[#C9A227]">
+            {dayNum}
+          </span>
+        ) : (
+          <span className="font-display text-[16px] font-light leading-none text-[rgba(26,26,26,0.65)]">
+            {dayNum}
+          </span>
+        )}
+      </div>
+
+      {/* Big metric — occupancy always; left-aligned, below day number */}
+      <div className="mt-7">
+        <div
+          className={cn(
+            'font-display text-[30px] font-semibold leading-none tabular-nums',
+            isPeak ? 'text-[#C9A227]' : 'text-[#1A1A1A]'
+          )}
+          style={{ letterSpacing: '-0.02em', fontFeatureSettings: "'tnum', 'ss01'" }}
+        >
+          {bigNumber}
+        </div>
+
+        {/* Proportional bar — width proportional to metric value */}
+        {barWidth > 0 && (
+          <div
+            className="mt-2 h-[2px]"
+            style={{ width: `${barWidth}px`, backgroundColor: barColor }}
           />
         )}
-      </div>
 
-      {/* Occupancy % — large, heatmap colored */}
-      <div
-        className={cn(
-          'text-center text-lg font-bold leading-none',
-          occupancyTextColor(occupancyPct)
-        )}
-      >
-        {soldRooms > 0 || totalRooms > 0 ? `${displayOcc}%` : '—'}
-      </div>
-
-      {/* Sold/total · ADR */}
-      <div className="mt-0.5 text-center text-[10px] leading-tight text-gray-500">
-        {totalRooms > 0 ? (
-          <>
-            {soldRooms}/{totalRooms}
-            {adr > 0 && (
-              <>
-                {' · '}
-                <span className="text-gray-400">{formatEur(adr)}</span>
-              </>
-            )}
-          </>
-        ) : (
-          <span className="text-gray-600">—</span>
-        )}
+        {/* Subtitle — occupancy mode: rooms·ADR; ADR mode: ADR·rooms */}
+        <div
+          className="mt-1.5 font-sans text-[12px] leading-tight tabular-nums text-[rgba(26,26,26,0.65)]"
+          style={{ fontFeatureSettings: "'tnum'" }}
+        >
+          {subtitle}
+        </div>
       </div>
     </button>
   )

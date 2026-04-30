@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase/client'
-import type { Reservation } from '@/types/database'
+import type { Reservation, DailyOccupancyOverride } from '@/types/database'
 
 /**
  * All active reservations (non-deleted, non-cancelled, non-no_show)
@@ -25,6 +25,31 @@ export function useDayReservations(date: string | null) {
         .gt('check_out_date', date)
         .order('channel', { ascending: true })
         .order('guest_name', { ascending: true })
+
+      if (error) throw new Error(error.message)
+      return data
+    },
+  })
+}
+
+/**
+ * Occupancy overrides for a specific date across all room types.
+ * When a row exists for a (date, room_type_id) combination, sold_rooms from
+ * this table overrides the reservation-derived count for drawer KPIs.
+ *
+ * Pass null to disable the query (e.g. when the drawer is closed).
+ */
+export function useDayOccupancyOverrides(date: string | null) {
+  return useQuery({
+    queryKey: ['calendar', 'day', 'occupancyOverrides', date],
+    enabled: date !== null,
+    queryFn: async (): Promise<DailyOccupancyOverride[]> => {
+      if (date === null) return []
+
+      const { data, error } = await supabase
+        .from('daily_occupancy_override')
+        .select('*')
+        .eq('date', date)
 
       if (error) throw new Error(error.message)
       return data

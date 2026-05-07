@@ -8,6 +8,9 @@ export type ReservationSource =
   | 'laserline_legacy'
   | 'manual'
 
+/** Superset of ReservationSource — includes import types that are not reservation sources */
+export type ImportSource = ReservationSource | 'occupancy_excel'
+
 export type ReservationStatus =
   | 'confirmed'
   | 'cancelled'
@@ -62,6 +65,10 @@ export type DailyOccupancyOverride = {
   sold_rooms: number
   capacity: number
   source: string
+  /** Timestamp of the upload batch — all rows from one upload share the same value */
+  snapshot_date: string
+  /** References imports.id; null for rows that pre-date the snapshot migration */
+  import_id: string | null
   notes: string | null
   created_at: string | null
   updated_at: string | null
@@ -142,7 +149,7 @@ export type Import = {
   imported_at: string
   file_name: string
   file_hash: string
-  source: ReservationSource
+  source: ImportSource
   records_total: number
   records_new: number
   records_updated: number

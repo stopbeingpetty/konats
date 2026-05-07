@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase/client'
 import type { Reservation, DailyOccupancyOverride } from '@/types/database'
+import { deduplicateByLatestSnapshot } from '../lib/deduplicateOverrides'
 
 /**
  * All active reservations (non-deleted, non-cancelled, non-no_show)
@@ -50,9 +51,11 @@ export function useDayOccupancyOverrides(date: string | null) {
         .from('daily_occupancy_override')
         .select('*')
         .eq('date', date)
+        .order('snapshot_date', { ascending: false })
 
       if (error) throw new Error(error.message)
-      return data
+      // Keep only the latest snapshot per (date, room_type_id)
+      return deduplicateByLatestSnapshot(data ?? [])
     },
   })
 }

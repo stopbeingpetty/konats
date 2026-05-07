@@ -90,3 +90,50 @@ export type CommitResult = {
 }
 
 export type ImportStep = 'upload' | 'parsing' | 'preview' | 'executing' | 'result'
+
+// ============================================================================
+// Occupancy Import — domain types
+// ============================================================================
+
+/** One parsed row from the Navis Popunjenost xlsx */
+export type OccupancyParsedRow = {
+  /** 1-based row number in the xlsx (header rows count) */
+  rowIndex: number
+  /** YYYY-MM-DD */
+  date: string
+  /** Croatian day abbreviation, e.g. "Pet" */
+  day: string
+  free_sup: number
+  free_exe: number
+  free_sui: number
+  occ_sup: number
+  occ_exe: number
+  occ_sui: number
+  occ_total: number
+  /** 0..1 */
+  pct: number
+}
+
+export type OccupancyValidationError = {
+  rowIndex: number
+  date: string
+  reason: string
+}
+
+/** One row in the before/after comparison table shown in preview */
+export type OccupancyComparisonRow = {
+  date: string
+  /** null when no existing snapshot exists for this date */
+  oldSold: number | null
+  oldCap: number | null
+  newSold: number
+  newCap: number
+}
+
+export type OccupancyCommitResult = {
+  inserted: number
+  skipped: number
+  errors: string[]
+}
+
+export type OccupancyImportStep = 'upload' | 'parsing' | 'preview' | 'executing' | 'result'

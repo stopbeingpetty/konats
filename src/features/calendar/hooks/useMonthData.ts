@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { format, endOfMonth } from 'date-fns'
 import { supabase } from '@/lib/supabase/client'
 import type { Reservation, RoomInventory, DemandMarker, Restriction, DailyOccupancyOverride } from '@/types/database'
+import { deduplicateByLatestSnapshot } from '../lib/deduplicateOverrides'
 
 // ============================================================================
 // Internal helpers
@@ -129,9 +130,11 @@ export function useMonthOccupancyOverrides(year: number, month: number) {
         .select('*')
         .gte('date', startDate)
         .lte('date', endDate)
+        .order('snapshot_date', { ascending: false })
 
       if (error) throw new Error(error.message)
-      return data
+      // Keep only the latest snapshot per (date, room_type_id)
+      return deduplicateByLatestSnapshot(data ?? [])
     },
   })
 }

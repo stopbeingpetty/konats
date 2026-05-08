@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { startOfWeek, endOfWeek, eachDayOfInterval, format } from 'date-fns'
 import type { DailyOccupancyOverride, DemandMarker, Reservation, Restriction, RoomInventory, RoomType } from '@/types/database'
 import type { CalendarViewMode } from '@/features/calendar/pages/CalendarPage'
+import type { PickupWindowDays } from '@/features/calendar/lib/metrics'
 import { DayCell } from './DayCell'
 
 // ============================================================================
@@ -55,6 +56,8 @@ interface CalendarGridProps {
   occupancyOverrides: DailyOccupancyOverride[]
   viewMode: CalendarViewMode
   monthMaxAdr: number
+  pickupWindow: PickupWindowDays
+  monthMaxPickup: number
   onDayClick: (dateStr: string) => void
 }
 
@@ -74,6 +77,8 @@ export function CalendarGrid({
   occupancyOverrides,
   viewMode,
   monthMaxAdr,
+  pickupWindow,
+  monthMaxPickup,
   onDayClick,
 }: CalendarGridProps) {
   const calendarDays = useMemo(() => buildCalendarDays(year, month), [year, month])
@@ -115,6 +120,8 @@ export function CalendarGrid({
               hasRestriction={hasAnyRestriction(dateStr, restrictions, selectedRoomTypeId)}
               viewMode={viewMode}
               monthMaxAdr={monthMaxAdr}
+              pickupWindow={pickupWindow}
+              monthMaxPickup={monthMaxPickup}
               onClick={() => onDayClick(dateStr)}
             />
           )

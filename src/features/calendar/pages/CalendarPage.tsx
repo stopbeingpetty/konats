@@ -11,10 +11,16 @@ import { useRoomTypesList } from '@/features/settings/hooks/useRoomTypes'
 import { MonthHeader } from '@/features/calendar/components/MonthHeader'
 import { CalendarGrid } from '@/features/calendar/components/CalendarGrid'
 import { DayDrawer } from '@/features/calendar/components/DayDrawer'
-import { computeHybridDayMetrics, computeMonthKpis } from '@/features/calendar/lib/metrics'
+import {
+  computeHybridDayMetrics,
+  computeMonthKpis,
+  computePickupForDate,
+  computeMonthPickupFiltered,
+  type PickupWindowDays,
+} from '@/features/calendar/lib/metrics'
 import { format, eachDayOfInterval, endOfMonth } from 'date-fns'
 
-export type CalendarViewMode = 'occupancy' | 'adr'
+export type CalendarViewMode = 'occupancy' | 'adr' | 'pickup'
 
 export default function CalendarPage() {
   const now = new Date()
@@ -23,6 +29,7 @@ export default function CalendarPage() {
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string | null>(null)
   const [drawerDate, setDrawerDate] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<CalendarViewMode>('occupancy')
+  const [pickupWindow, setPickupWindow] = useState<PickupWindowDays>(7)
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   const { data: roomTypes = [], isLoading: rtLoading } = useRoomTypesList()
@@ -55,6 +62,30 @@ export default function CalendarPage() {
     const maxAdr = dailyMetrics.reduce((max, d) => (d.adr > max ? d.adr : max), 0)
     return [computeMonthKpis(year, month, dailyMetrics, reservations, new Date()), maxAdr] as const
   }, [isLoading, year, month, selectedRoomTypeId, roomTypes, reservations, inventory, overrides])
+
+  // ── Month pickup totals (all 4 windows, legacy excluded) ──────────────────
+  const monthPickupTotals = useMemo(() => {
+    const refDate = new Date()
+    return {
+      1:  computeMonthPickupFiltered(year, month, reservations, 1,  refDate),
+      3:  computeMonthPickupFiltered(year, month, reservations, 3,  refDate),
+      7:  computeMonthPickupFiltered(year, month, reservations, 7,  refDate),
+      14: computeMonthPickupFiltered(year, month, reservations, 14, refDate),
+    } as Record<PickupWindowDays, number>
+  }, [year, month, reservations])
+
+  // ── Month max pickup (for per-cell heatmap scaling) ────────────────────────
+  const monthMaxPickup = useMemo(() => {
+    if (reservations.length === 0) return 0
+    const refDate = new Date()
+    const monthStart = new Date(year, month - 1, 1)
+    const days = eachDayOfInterval({ start: monthStart, end: endOfMonth(monthStart) })
+    return days.reduce((max, day) => {
+      const dateStr = format(day, 'yyyy-MM-dd')
+      const p = computePickupForDate(dateStr, pickupWindow, reservations, refDate)
+      return p > max ? p : max
+    }, 0)
+  }, [year, month, reservations, pickupWindow])
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   function prevMonth() {
@@ -98,6 +129,9 @@ export default function CalendarPage() {
         isLoading={isLoading}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        pickupWindow={pickupWindow}
+        onPickupWindowChange={setPickupWindow}
+        monthPickupTotals={monthPickupTotals}
       />
 
       <div className="flex-1 overflow-auto p-4">
@@ -116,6 +150,8 @@ export default function CalendarPage() {
             occupancyOverrides={overrides}
             viewMode={viewMode}
             monthMaxAdr={monthMaxAdr}
+            pickupWindow={pickupWindow}
+            monthMaxPickup={monthMaxPickup}
             onDayClick={openDrawer}
           />
         )}

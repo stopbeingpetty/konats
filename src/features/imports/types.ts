@@ -16,6 +16,8 @@ export type SkipReason =
 export type PhobsParsedRow = {
   /** Human-readable row index (title=1, header=2, data starts at 3) */
   rowIndex: number
+  /** Phobs internal row ID from column 0 ("#" / "Br. #"). Used to build composite phobs_reservation_id. */
+  internalId: string
   code: string
   origin: string
   dolazak: string

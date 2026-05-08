@@ -129,8 +129,21 @@ export function mapPhobsRow(
     rawPayload[`col_${idx}`] = cell
   })
 
+  // Compose a unique ID per room row. Multi-room bookings share the same Code
+  // but have distinct internalIds in column 0, so we combine them to prevent
+  // ON CONFLICT collisions when N rooms arrive in the same import batch.
+  let phobsReservationId: string
+  if (raw.internalId) {
+    phobsReservationId = `${raw.code}-${raw.internalId}`
+  } else {
+    console.warn(
+      `[mapPhobsRow] row ${raw.rowIndex}: internalId (col 0) is empty — falling back to code only ("${raw.code}")`
+    )
+    phobsReservationId = raw.code
+  }
+
   const base = {
-    phobs_reservation_id: raw.code,
+    phobs_reservation_id: phobsReservationId,
     channel,
     check_in_date: checkIn,
     check_out_date: checkOut,

@@ -112,6 +112,7 @@ describe('parsePhobsXls', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     const row = result.rows[0]
+    expect(row.internalId).toBe('1')  // column 0 value from ROW1
     expect(row.code).toBe('2449938597')
     expect(row.origin).toBe('Expedia.com')
     expect(row.dolazak).toBe('2024-07-10')
@@ -181,5 +182,47 @@ describe('parsePhobsXls', () => {
     if (!result.ok) return
     expect(result.rows[0].allCells).toHaveLength(50)
     expect(result.rows[0].allCells[1]).toBe('2449938597')
+  })
+
+  it('extracts distinct internalIds for two rows that share the same Code (multi-room booking)', () => {
+    // Simulate Ernest Debreslioski's 2-room booking: same Code, different col-0 IDs
+    const MULTI_ROW_A: Record<number, string> = {
+      0: '27759512',  // Phobs internal ID — room 1
+      1: '6413243407',
+      2: 'Expedia.com',
+      8: '2024-07-10',
+      9: '2024-07-14',
+      11: 'ERNEST DEBRESLIOSKI',
+      21: 'HR',
+      22: 'Superior Room 101',
+      25: '2',
+      26: '0',
+      29: 'EUR',
+      33: '1.200,00',
+      42: 'ok',
+      44: '2024-05-01T10:00:00',
+      46: '70',
+    }
+    const MULTI_ROW_B: Record<number, string> = {
+      ...MULTI_ROW_A,
+      0: '27759513',  // Phobs internal ID — room 2
+    }
+    const html = `<html><body><table>
+      <tr><td colspan="100%">Title</td></tr>
+      <tr>${makeCells(HDR)}</tr>
+      <tr>${makeCells(MULTI_ROW_A)}</tr>
+      <tr>${makeCells(MULTI_ROW_B)}</tr>
+    </table></body></html>`
+
+    const result = parsePhobsXls(html)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.rows).toHaveLength(2)
+    expect(result.rows[0].internalId).toBe('27759512')
+    expect(result.rows[1].internalId).toBe('27759513')
+    expect(result.rows[0].code).toBe('6413243407')
+    expect(result.rows[1].code).toBe('6413243407')
+    // internalIds differ — no collision possible in upsert
+    expect(result.rows[0].internalId).not.toBe(result.rows[1].internalId)
   })
 })

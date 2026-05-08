@@ -47,6 +47,20 @@ export interface MetricsReservationCount {
   sold_rooms: number
 }
 
+/**
+ * Minimal shape needed for pickup computation.
+ * The full Reservation type from database.ts structurally satisfies this.
+ */
+export interface PickupReservation {
+  source: string
+  check_in_date: string
+  check_out_date: string
+  booked_date: string
+  rooms_count: number
+  status: string
+  deleted_at: string | null
+}
+
 // ============================================================================
 // Output types
 // ============================================================================
@@ -346,6 +360,82 @@ export function computeAvgLeadTimeForDate(
 export function computeAvgLeadTime(reservations: MetricsReservation[]): number {
   if (reservations.length === 0) return 0
   return reservations.reduce((sum, r) => sum + r.booking_window, 0) / reservations.length
+}
+
+/**
+ * Count picked-up rooms for a specific stay-date within a window.
+ * KEY: excludes laserline_legacy reservations (their booked_date is artificial).
+ * Sums rooms_count (not reservation row count).
+ *
+ * @param date        YYYY-MM-DD stay date
+ * @param windowDays  lookback window in days (e.g. 1, 3, 7, 14)
+ * @param reservations  full reservations array (pre-filtering NOT required)
+ * @param refDate     reference "today" — defaults to new Date()
+ */
+export function computePickupForDate(
+  date: string,
+  windowDays: number,
+  reservations: PickupReservation[],
+  refDate: Date = new Date()
+): number {
+  const cutoff = format(
+    new Date(refDate.getTime() - windowDays * 24 * 60 * 60 * 1000),
+    'yyyy-MM-dd'
+  )
+  return reservations
+    .filter(
+      (r) =>
+        r.source !== 'laserline_legacy' &&
+        r.deleted_at === null &&
+        (r.status === 'confirmed' ||
+          r.status === 'checked_in' ||
+          r.status === 'checked_out') &&
+        r.check_in_date <= date &&
+        r.check_out_date > date &&
+        r.booked_date >= cutoff
+    )
+    .reduce((sum, r) => sum + r.rooms_count, 0)
+}
+
+/**
+ * Total picked-up rooms for the entire month within a window.
+ * Counts a reservation once if any stay-night falls in the month.
+ * Excludes laserline_legacy reservations.
+ *
+ * @param year       calendar year
+ * @param month      1-based month
+ * @param reservations  full reservations array (pre-filtering NOT required)
+ * @param windowDays lookback window in days
+ * @param refDate    reference "today" — defaults to new Date()
+ */
+export function computeMonthPickupFiltered(
+  year: number,
+  month: number,
+  reservations: PickupReservation[],
+  windowDays: number,
+  refDate: Date = new Date()
+): number {
+  const cutoff = format(
+    new Date(refDate.getTime() - windowDays * 24 * 60 * 60 * 1000),
+    'yyyy-MM-dd'
+  )
+  const monthFirstDay = new Date(year, month - 1, 1)
+  const monthStart = format(monthFirstDay, 'yyyy-MM-dd')
+  const monthEnd = format(endOfMonth(monthFirstDay), 'yyyy-MM-dd')
+
+  return reservations
+    .filter(
+      (r) =>
+        r.source !== 'laserline_legacy' &&
+        r.deleted_at === null &&
+        (r.status === 'confirmed' ||
+          r.status === 'checked_in' ||
+          r.status === 'checked_out') &&
+        r.booked_date >= cutoff &&
+        r.check_in_date <= monthEnd &&
+        r.check_out_date > monthStart
+    )
+    .reduce((sum, r) => sum + r.rooms_count, 0)
 }
 
 /**

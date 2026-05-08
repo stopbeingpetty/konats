@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/sheet'
 import {
   computeHybridDayMetrics,
-  computePickup,
+  computePickupForDate,
   type PickupWindowDays,
 } from '@/features/calendar/lib/metrics'
 import { useDayReservations, useDayOccupancyOverrides } from '@/features/calendar/hooks/useDayDetail'
@@ -102,7 +102,7 @@ export function DayDrawer({
     () =>
       PICKUP_WINDOWS.reduce(
         (acc, w) => {
-          acc[w] = computePickup(date, monthReservations, w, refDate)
+          acc[w] = computePickupForDate(date, w, monthReservations, refDate)
           return acc
         },
         {} as Record<PickupWindowDays, number>
@@ -220,7 +220,7 @@ export function DayDrawer({
                 </div>
                 {allPickupZero && (
                   <p className="mt-3 font-sans text-[11px] text-[rgba(26,26,26,0.4)]">
-                    — no pickup signal yet. Available once future bookings are tracked.
+                    — no recent bookings for this date
                   </p>
                 )}
               </div>

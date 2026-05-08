@@ -6,10 +6,12 @@ export type ParseResult =
 
 // ---------------------------------------------------------------------------
 // 0-based column indices in the Phobs HTML table.
-// Row 0 of the header is "#" (row number); the spec numbers columns starting
-// at 1 for "Code", which matches 0-based index 1 since "#" is at index 0.
+// Column 0 is "#" (Phobs internal row ID, "Br. #" / "Stavka"). It differs
+// for each room row in a multi-room booking and is used as the internalId
+// component of the composite phobs_reservation_id.
 // ---------------------------------------------------------------------------
 const COL = {
+  internalId: 0,
   code: 1,
   origin: 2,
   dolazak: 8,
@@ -64,6 +66,7 @@ export function parsePhobsXls(fileText: string): ParseResult {
 
     parsed.push({
       rowIndex: i + 3, // human-readable: title(1) + header(2) + data from 3
+      internalId: get(COL.internalId),
       code: get(COL.code),
       origin: get(COL.origin),
       dolazak: get(COL.dolazak),

@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import type { DailyOccupancyOverride, DemandLevel, RoomInventory, RoomType } from '@/types/database'
 import type { Reservation } from '@/types/database'
 import type { CalendarViewMode } from '@/features/calendar/pages/CalendarPage'
-import { computeHybridDayMetrics } from '@/features/calendar/lib/metrics'
+import { computeHybridDayMetrics, computePickupForDate, type PickupWindowDays } from '@/features/calendar/lib/metrics'
 
 // ============================================================================
 // Utilities
@@ -33,6 +33,15 @@ function heatmapBarColor(barPct: number): string {
   return '#E5DCC5'
 }
 
+/** Bar color for pickup mode — no gold (gold is reserved for occupancy peak/ADR). */
+function pickupBarColor(count: number): string {
+  if (count <= 0) return 'transparent'
+  if (count >= 16) return '#0F3D3E'
+  if (count >= 8)  return 'rgba(15,61,62,0.65)'
+  if (count >= 4)  return '#B8C9C0'
+  return '#E5DCC5'
+}
+
 // ============================================================================
 // Props
 // ============================================================================
@@ -49,6 +58,8 @@ interface DayCellProps {
   hasRestriction: boolean
   viewMode: CalendarViewMode
   monthMaxAdr: number
+  pickupWindow: PickupWindowDays
+  monthMaxPickup: number
   onClick: () => void
 }
 
@@ -68,6 +79,8 @@ export function DayCell({
   hasRestriction,
   viewMode,
   monthMaxAdr,
+  pickupWindow,
+  monthMaxPickup,
   onClick,
 }: DayCellProps) {
   const inCurrentMonth = isSameMonth(date, currentMonthDate)
@@ -98,33 +111,66 @@ export function DayCell({
   const displayOcc = Math.round(occupancyPct)
   const dayNum = date.getDate()
 
-  // ── Bar logic: ADR-relative in ADR mode, occupancy in occupancy mode ─────
-  const barPct =
-    viewMode === 'adr' && monthMaxAdr > 0
-      ? (adr / monthMaxAdr) * 100
-      : occupancyPct
-  const barWidth = barPct <= 0 ? 0 : Math.max(6, Math.round((barPct / 100) * 24))
-  const barColor = heatmapBarColor(barPct)
-
   // ── isPeak only for current-month cells (no gold on overflow days) ────────
   const isPeak = inCurrentMonth && occupancyPct >= 100
 
-  // ── Big number is ALWAYS occupancy ───────────────────────────────────────
-  const bigNumber = totalRooms > 0 ? `${displayOcc}%` : '—'
+  // ── Pickup metrics (computed only in pickup mode for current-month cells) ─
+  const pickupCount =
+    viewMode === 'pickup' && inCurrentMonth
+      ? computePickupForDate(dateStr, pickupWindow, reservations)
+      : 0
 
-  // ── Subtitle: ADR tab foregrounds ADR value, Occ tab foregrounds rooms ────
-  const subtitle =
-    viewMode === 'adr'
-      ? totalRooms > 0
-        ? adr > 0
-          ? `${formatEur(adr)} · ${soldRooms}/${totalRooms}`
-          : `${soldRooms}/${totalRooms}`
-        : '—'
+  // ── Bar logic ─────────────────────────────────────────────────────────────
+  let barWidth = 0
+  let barColor = 'transparent'
+
+  if (viewMode === 'pickup') {
+    barWidth =
+      inCurrentMonth && pickupCount > 0 && monthMaxPickup > 0
+        ? Math.max(6, Math.round((pickupCount / monthMaxPickup) * 24))
+        : 0
+    barColor = pickupBarColor(pickupCount)
+  } else {
+    const barPct =
+      viewMode === 'adr' && monthMaxAdr > 0
+        ? (adr / monthMaxAdr) * 100
+        : occupancyPct
+    barWidth = barPct <= 0 ? 0 : Math.max(6, Math.round((barPct / 100) * 24))
+    barColor = heatmapBarColor(barPct)
+  }
+
+  // ── Big number ────────────────────────────────────────────────────────────
+  const bigNumber =
+    viewMode === 'pickup'
+      ? inCurrentMonth
+        ? pickupCount > 0
+          ? `+${pickupCount}`
+          : '0'
+        : ''
       : totalRooms > 0
-        ? adr > 0
-          ? `${soldRooms}/${totalRooms} · ${formatEur(adr)}`
-          : `${soldRooms}/${totalRooms}`
+        ? `${displayOcc}%`
         : '—'
+
+  // ── Subtitle ──────────────────────────────────────────────────────────────
+  const pickupSubtitleText =
+    pickupWindow === 1 ? 'in last 24h' : `in last ${pickupWindow} days`
+
+  const subtitle =
+    viewMode === 'pickup'
+      ? inCurrentMonth
+        ? pickupSubtitleText
+        : ''
+      : viewMode === 'adr'
+        ? totalRooms > 0
+          ? adr > 0
+            ? `${formatEur(adr)} · ${soldRooms}/${totalRooms}`
+            : `${soldRooms}/${totalRooms}`
+          : '—'
+        : totalRooms > 0
+          ? adr > 0
+            ? `${soldRooms}/${totalRooms} · ${formatEur(adr)}`
+            : `${soldRooms}/${totalRooms}`
+          : '—'
 
   // ── Fri/Sat: 1px gold left border only — no bg tint ─────────────────────
   const cellBg = '#FFFFFF'
@@ -190,12 +236,18 @@ export function DayCell({
         )}
       </div>
 
-      {/* Big metric — occupancy always; left-aligned, below day number */}
+      {/* Big metric — below day number */}
       <div className="mt-7">
         <div
           className={cn(
             'font-display text-[30px] font-semibold leading-none tabular-nums',
-            isPeak ? 'text-[#C9A227]' : 'text-[#1A1A1A]'
+            viewMode === 'pickup'
+              ? pickupCount === 0
+                ? 'text-[rgba(26,26,26,0.3)]'
+                : 'text-[#1A1A1A]'
+              : isPeak
+                ? 'text-[#C9A227]'
+                : 'text-[#1A1A1A]'
           )}
           style={{ letterSpacing: '-0.02em', fontFeatureSettings: "'tnum', 'ss01'" }}
         >

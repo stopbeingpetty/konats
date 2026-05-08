@@ -1,7 +1,8 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
-import type { MonthKpis } from '@/features/calendar/lib/metrics'
+import type { MonthKpis, PickupWindowDays } from '@/features/calendar/lib/metrics'
 import type { RoomType } from '@/types/database'
 import type { CalendarViewMode } from '@/features/calendar/pages/CalendarPage'
 
@@ -39,6 +40,9 @@ interface MonthHeaderProps {
   isLoading: boolean
   viewMode: CalendarViewMode
   onViewModeChange: (mode: CalendarViewMode) => void
+  pickupWindow: PickupWindowDays
+  onPickupWindowChange: (w: PickupWindowDays) => void
+  monthPickupTotals: Record<PickupWindowDays, number>
 }
 
 // ============================================================================
@@ -57,6 +61,9 @@ export function MonthHeader({
   isLoading,
   viewMode,
   onViewModeChange,
+  pickupWindow,
+  onPickupWindowChange,
+  monthPickupTotals,
 }: MonthHeaderProps) {
   const monthDate = new Date(year, month - 1, 1)
   const monthName = format(monthDate, 'MMMM').toUpperCase()
@@ -95,11 +102,22 @@ export function MonthHeader({
 
       {/* ── ROW 2: KPI strip — inline label + value pairs ───────────────────── */}
       <div className="flex h-9 items-center" style={{ gap: '28px' }}>
-        <KpiItem label="OCC"    value={isLoading ? '—' : fmtPct(kpis?.occupancyPct ?? 0)} />
-        <KpiItem label="ADR"    value={isLoading ? '—' : fmtEur(kpis?.adr ?? 0)} />
-        <KpiItem label="REVPAR" value={isLoading ? '—' : fmtEur(kpis?.revpar ?? 0)} />
-        <KpiItem label="REV"    value={isLoading ? '—' : fmtEur(kpis?.totalRevenue ?? 0)} />
-        <KpiItem label="ALOS"   value={isLoading ? '—' : (kpis?.alos ?? 0).toFixed(1)} />
+        {viewMode === 'pickup' ? (
+          <>
+            <KpiItem label="PICKUP 24H" value={isLoading ? '—' : String(monthPickupTotals[1])} />
+            <KpiItem label="PICKUP 3D"  value={isLoading ? '—' : String(monthPickupTotals[3])} />
+            <KpiItem label="PICKUP 7D"  value={isLoading ? '—' : String(monthPickupTotals[7])} />
+            <KpiItem label="PICKUP 14D" value={isLoading ? '—' : String(monthPickupTotals[14])} />
+          </>
+        ) : (
+          <>
+            <KpiItem label="OCC"    value={isLoading ? '—' : fmtPct(kpis?.occupancyPct ?? 0)} />
+            <KpiItem label="ADR"    value={isLoading ? '—' : fmtEur(kpis?.adr ?? 0)} />
+            <KpiItem label="REVPAR" value={isLoading ? '—' : fmtEur(kpis?.revpar ?? 0)} />
+            <KpiItem label="REV"    value={isLoading ? '—' : fmtEur(kpis?.totalRevenue ?? 0)} />
+          </>
+        )}
+        <KpiItem label="ALOS" value={isLoading ? '—' : (kpis?.alos ?? 0).toFixed(1)} />
         <div className="ml-auto">
           <KpiItem label="LEAD" value={isLoading ? '—' : `${Math.round(kpis?.avgLeadTime ?? 0)}d`} />
         </div>
@@ -111,13 +129,10 @@ export function MonthHeader({
         <div className="flex items-center" style={{ gap: '28px' }}>
           <TabButton label="OCCUPANCY" active={viewMode === 'occupancy'} onClick={() => onViewModeChange('occupancy')} />
           <TabButton label="ADR"       active={viewMode === 'adr'}       onClick={() => onViewModeChange('adr')} />
-          <button
-            disabled
-            title="Available once future bookings are tracked"
-            className="cursor-not-allowed font-sans text-[13px] font-medium uppercase tracking-[0.12em] text-[rgba(26,26,26,0.3)]"
-          >
-            PICKUP
-          </button>
+          <TabButton label="PICKUP"    active={viewMode === 'pickup'}    onClick={() => onViewModeChange('pickup')} />
+          {viewMode === 'pickup' && (
+            <PickupWindowDropdown value={pickupWindow} onChange={onPickupWindowChange} />
+          )}
         </div>
 
         {/* Nav arrows + room type pills */}
@@ -203,6 +218,57 @@ function TabButton({
         <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#C9A227]" />
       )}
     </button>
+  )
+}
+
+const PICKUP_WINDOW_LABELS: Record<PickupWindowDays, string> = {
+  1: 'LAST 24H',
+  3: 'LAST 3 DAYS',
+  7: 'LAST 7 DAYS',
+  14: 'LAST 14 DAYS',
+}
+
+function PickupWindowDropdown({
+  value,
+  onChange,
+}: {
+  value: PickupWindowDays
+  onChange: (v: PickupWindowDays) => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 font-sans text-[13px] font-medium uppercase tracking-[0.12em] text-[rgba(26,26,26,0.7)] hover:text-[#1A1A1A]"
+      >
+        {PICKUP_WINDOW_LABELS[value]}
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <>
+          {/* Click-away overlay */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-1 min-w-[140px] rounded border border-[#D8DEDE] bg-white shadow-sm">
+            {([1, 3, 7, 14] as PickupWindowDays[]).map((w) => (
+              <button
+                key={w}
+                onClick={() => { onChange(w); setOpen(false) }}
+                className={cn(
+                  'block w-full px-3 py-2 text-left font-sans text-[12px] font-medium uppercase tracking-[0.12em]',
+                  w === value
+                    ? 'bg-[#F0F4F4] text-[#1A1A1A]'
+                    : 'text-[rgba(26,26,26,0.6)] hover:bg-[#F0F4F4] hover:text-[#1A1A1A]'
+                )}
+              >
+                {PICKUP_WINDOW_LABELS[w]}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 

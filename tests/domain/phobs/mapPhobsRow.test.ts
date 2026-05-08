@@ -4,10 +4,11 @@ import {
   matchRoomType,
   mapStatus,
   parseHrDecimal,
+  mapPhobsRow,
 } from '@/features/imports/lib/mapPhobsRow'
 import { buildUpsertPayload } from '@/features/imports/lib/buildUpsertPayload'
 import type { RoomType } from '@/types/database'
-import type { PreviewRow } from '@/features/imports/types'
+import type { PreviewRow, PhobsParsedRow } from '@/features/imports/types'
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -321,5 +322,74 @@ describe('buildUpsertPayload — idempotency', () => {
     }
     const payload = buildUpsertPayload(cancelRow, undefined)
     expect(payload.cancellation_date).toBe('2024-06-15')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// mapPhobsRow — composite phobs_reservation_id
+// ---------------------------------------------------------------------------
+
+function makeRawRow(overrides: Partial<PhobsParsedRow> = {}): PhobsParsedRow {
+  return {
+    rowIndex: 3,
+    internalId: '27759512',
+    code: '6413243407',
+    origin: 'Expedia.com',
+    dolazak: '2024-07-10',
+    odlazak: '2024-07-14',
+    nositeljRezervacije: 'ERNEST DEBRESLIOSKI',
+    drzava: 'HR',
+    smjestaj: 'Superior Room 101',
+    odraslih: '2',
+    djeca: '0',
+    valuta: 'EUR',
+    ukupno: '1.200,00',
+    status: 'ok',
+    datumNastanka: '2024-05-01T10:00:00',
+    bookiranoUnaprijed: '70',
+    allCells: [],
+    ...overrides,
+  }
+}
+
+describe('mapPhobsRow — composite phobs_reservation_id', () => {
+  it('single-room reservation: phobs_reservation_id is Code-internalId', () => {
+    const row = makeRawRow({ internalId: '27759512', code: '6413243407' })
+    const result = mapPhobsRow(row, MOCK_ROOM_TYPES, '2024-07-01')
+    expect(result.phobs_reservation_id).toBe('6413243407-27759512')
+  })
+
+  it('two-room reservation: same Code + different internalIds → 2 distinct composite IDs', () => {
+    const row1 = makeRawRow({ internalId: '27759512', code: '6413243407' })
+    const row2 = makeRawRow({ internalId: '27759513', code: '6413243407' })
+    const res1 = mapPhobsRow(row1, MOCK_ROOM_TYPES, '2024-07-01')
+    const res2 = mapPhobsRow(row2, MOCK_ROOM_TYPES, '2024-07-01')
+    expect(res1.phobs_reservation_id).toBe('6413243407-27759512')
+    expect(res2.phobs_reservation_id).toBe('6413243407-27759513')
+    expect(res1.phobs_reservation_id).not.toBe(res2.phobs_reservation_id)
+  })
+
+  it('re-importing the same row produces the identical composite ID (idempotent)', () => {
+    const row = makeRawRow({ internalId: '27759512', code: '6413243407' })
+    const first  = mapPhobsRow(row, MOCK_ROOM_TYPES, '2024-07-01')
+    const second = mapPhobsRow(row, MOCK_ROOM_TYPES, '2024-07-02')
+    expect(first.phobs_reservation_id).toBe(second.phobs_reservation_id)
+  })
+
+  it('same Code with different internalId (Phobs row recreated) → distinct ID, old row unaffected', () => {
+    const original  = makeRawRow({ internalId: '27759512', code: '6413243407' })
+    const recreated = makeRawRow({ internalId: '99999999', code: '6413243407' })
+    const resOriginal  = mapPhobsRow(original,  MOCK_ROOM_TYPES, '2024-07-01')
+    const resRecreated = mapPhobsRow(recreated, MOCK_ROOM_TYPES, '2024-07-01')
+    expect(resOriginal.phobs_reservation_id).toBe('6413243407-27759512')
+    expect(resRecreated.phobs_reservation_id).toBe('6413243407-99999999')
+    // Different keys → upsert inserts new row, original row in DB is untouched
+    expect(resOriginal.phobs_reservation_id).not.toBe(resRecreated.phobs_reservation_id)
+  })
+
+  it('falls back to Code-only when internalId is empty (edge case)', () => {
+    const row = makeRawRow({ internalId: '', code: '6413243407' })
+    const result = mapPhobsRow(row, MOCK_ROOM_TYPES, '2024-07-01')
+    expect(result.phobs_reservation_id).toBe('6413243407')
   })
 })

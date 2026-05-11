@@ -153,7 +153,9 @@ export function DayCell({
 
   // ── Subtitle ──────────────────────────────────────────────────────────────
   const pickupSubtitleText =
-    pickupWindow === 1 ? 'in last 24h' : `in last ${pickupWindow} days`
+    pickupWindow === 1
+      ? `OCC ${displayOcc}% · in last 24h`
+      : `OCC ${displayOcc}% · in last ${pickupWindow}d`
 
   const subtitle =
     viewMode === 'pickup'

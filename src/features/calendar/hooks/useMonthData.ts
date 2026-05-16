@@ -34,8 +34,10 @@ export function useMonthReservations(year: number, month: number) {
         .from('reservations')
         .select('*')
         .is('deleted_at', null)
-        .neq('status', 'cancelled')
-        .neq('status', 'no_show')
+        // Fetch all statuses (including cancelled) so the hybrid-occupancy logic can
+        // subtract cancellations that occurred after the Excel snapshot.
+        // Metric functions (computeHybridDayMetrics, computeMonthKpis, etc.) filter
+        // to active statuses internally for ADR / revenue / pickup denominators.
         // Has at least one night in the month:
         // check_in_date <= monthLastDay  AND  check_out_date > monthFirstDay
         .lte('check_in_date', endDate)

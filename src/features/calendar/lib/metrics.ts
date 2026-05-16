@@ -20,6 +20,14 @@ export interface MetricsReservation {
   booking_window: number
   channel: string
   room_type_id: string
+  /** Reservation source; only 'phobs_excel' participates in occupancy delta */
+  source?: string
+  /** Lifecycle status; when absent treated as active (confirmed/checked_in/checked_out) */
+  status?: string
+  /** YYYY-MM-DD; set when status = 'cancelled' */
+  cancellation_date?: string | null
+  /** Soft-delete timestamp; null = not deleted */
+  deleted_at?: string | null
 }
 
 export interface MetricsRoomType {
@@ -40,6 +48,8 @@ export interface MetricsOccupancyOverride {
   room_type_id: string
   sold_rooms: number
   capacity: number
+  /** YYYY-MM-DD timestamp of the Excel upload batch; absent = treated as '1900-01-01' */
+  snapshot_date?: string
 }
 
 export interface MetricsReservationCount {
@@ -124,6 +134,90 @@ export function getEffectiveOccupancy(
 }
 
 // ============================================================================
+// Hybrid occupancy helper
+// ============================================================================
+
+const ACTIVE_STATUSES = new Set(['confirmed', 'checked_in', 'checked_out'])
+
+/**
+ * Compute hybrid occupancy for a single (date, room_type_id) pair.
+ *
+ * Algorithm:
+ *   baseline = latest Excel snapshot (override.sold_rooms), or 0 if none
+ *   delta    = Phobs reservations booked AFTER snapshot_date that occupy date (active statuses)
+ *   cancels  = Phobs reservations booked BEFORE snapshot_date, cancelled AFTER snapshot_date
+ *   sold     = clamp(baseline + delta - cancels, 0, capacity)
+ *
+ * KEY: Only source='phobs_excel' reservations participate in the delta.
+ *      Reservations booked before the snapshot are already in the baseline.
+ *      Reservations booked AND cancelled after snapshot contribute net 0
+ *      (not counted in delta, not subtracted from baseline).
+ *
+ * @param date         YYYY-MM-DD
+ * @param roomTypeId   UUID of the room type
+ * @param overrides    Latest override rows (already deduplicated to 1 per date+type)
+ * @param reservations All reservations including cancelled; unfiltered by status
+ */
+export function getOccupancyForDateType(
+  date: string,
+  roomTypeId: string,
+  overrides: MetricsOccupancyOverride[],
+  reservations: MetricsReservation[]
+): { sold: number; capacity: number | null; baseline: number; delta: number } {
+  const override = overrides.find(
+    (o) => o.date === date && o.room_type_id === roomTypeId
+  )
+
+  const baseline = override?.sold_rooms ?? 0
+  const capacity = override?.capacity ?? null
+  const snapshotDate = override?.snapshot_date ?? '1900-01-01'
+
+  // Phobs reservations booked AFTER snapshot that are still active on this date
+  const phobsDelta = reservations
+    .filter(
+      (r) =>
+        r.source === 'phobs_excel' &&
+        r.room_type_id === roomTypeId &&
+        r.check_in_date <= date &&
+        r.check_out_date > date &&
+        r.booked_date > snapshotDate &&
+        ACTIVE_STATUSES.has(r.status ?? '') &&
+        (r.deleted_at === null || r.deleted_at === undefined)
+    )
+    .reduce((sum, r) => sum + r.rooms_count, 0)
+
+  // Phobs reservations booked BEFORE snapshot (already in baseline) but
+  // cancelled AFTER snapshot (baseline doesn't reflect the cancellation yet)
+  const phobsCancellations = reservations
+    .filter(
+      (r) =>
+        r.source === 'phobs_excel' &&
+        r.room_type_id === roomTypeId &&
+        r.check_in_date <= date &&
+        r.check_out_date > date &&
+        r.booked_date <= snapshotDate &&
+        r.status === 'cancelled' &&
+        r.cancellation_date != null &&
+        r.cancellation_date > snapshotDate &&
+        (r.deleted_at === null || r.deleted_at === undefined)
+    )
+    .reduce((sum, r) => sum + r.rooms_count, 0)
+
+  const raw = baseline + phobsDelta - phobsCancellations
+  const capped = capacity !== null ? Math.min(raw, capacity) : raw
+  const sold = Math.max(0, capped)
+
+  if (capacity !== null && raw > capacity) {
+    console.warn(
+      `[getOccupancyForDateType] effective_sold clamped: date=${date} room_type=${roomTypeId}` +
+        ` raw=${raw} capacity=${capacity}`
+    )
+  }
+
+  return { sold, capacity, baseline, delta: phobsDelta - phobsCancellations }
+}
+
+// ============================================================================
 // Internal helpers
 // ============================================================================
 
@@ -168,11 +262,15 @@ export function computeHybridDayMetrics(
   overrides: MetricsOccupancyOverride[] = []
 ): DayMetrics {
   const roomTypeIds = new Set(roomTypes.map((rt) => rt.id))
+  // Active-only staying reservations for revenue/ADR/no-override sold counts.
+  // When status is absent (old fixtures / pre-migration data) the reservation is
+  // treated as active for backward-compatibility.
   const staying = reservations.filter(
     (r) =>
       r.check_in_date <= date &&
       r.check_out_date > date &&
-      roomTypeIds.has(r.room_type_id)
+      roomTypeIds.has(r.room_type_id) &&
+      (r.status === undefined || ACTIVE_STATUSES.has(r.status))
   )
 
   // Revenue always from reservations (scoped to the requested room types)
@@ -187,8 +285,11 @@ export function computeHybridDayMetrics(
     const override = overrides.find((o) => o.date === date && o.room_type_id === rt.id)
 
     if (override !== undefined) {
+      // Hybrid: Excel snapshot is the baseline; Phobs reservations booked after the
+      // snapshot date are added as a delta; cancellations after snapshot are subtracted.
+      const { sold } = getOccupancyForDateType(date, rt.id, overrides, reservations)
       totalRooms += override.capacity
-      soldRooms += override.sold_rooms
+      soldRooms += sold
     } else {
       const inv = inventory.find((i) => i.date === date && i.room_type_id === rt.id)
       totalRooms += inv !== undefined ? inv.total_rooms : rt.default_room_count
@@ -323,6 +424,7 @@ export function computeMonthPickup(
 
   return reservations.filter(
     (r) =>
+      (r.status === undefined || ACTIVE_STATUSES.has(r.status)) &&
       r.booked_date >= cutoff &&
       r.check_in_date <= monthEnd &&
       r.check_out_date > monthStart
@@ -468,11 +570,17 @@ export function computeMonthKpis(
 
   const occupancyPct = totalAvailable > 0 ? (totalSold / totalAvailable) * 100 : 0
 
+  // Pre-filter to active reservations so that cancelled records (now in the fetch
+  // for hybrid-occupancy delta purposes) do not inflate ADR/ALOS/lead-time denominators.
+  const activeReservations = reservations.filter(
+    (r) => r.status === undefined || ACTIVE_STATUSES.has(r.status)
+  )
+
   // ADR denominator: reservation room-nights clipped to this month (not override-inflated sold).
   const monthStartStr = format(new Date(year, month - 1, 1), 'yyyy-MM-dd')
   const monthEndExclusive = format(new Date(year, month, 1), 'yyyy-MM-dd')
   let resSoldRoomNights = 0
-  for (const r of reservations) {
+  for (const r of activeReservations) {
     if (r.check_in_date >= monthEndExclusive || r.check_out_date <= monthStartStr) continue
     const effIn = r.check_in_date > monthStartStr ? r.check_in_date : monthStartStr
     const effOut = r.check_out_date < monthEndExclusive ? r.check_out_date : monthEndExclusive
@@ -495,8 +603,8 @@ export function computeMonthKpis(
     adr,
     revpar,
     totalRevenue,
-    alos: computeALOS(reservations),
-    avgLeadTime: computeAvgLeadTime(reservations),
+    alos: computeALOS(activeReservations),
+    avgLeadTime: computeAvgLeadTime(activeReservations),
     pickup,
   }
 }

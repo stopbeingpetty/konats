@@ -26,6 +26,10 @@ export interface MetricsReservation {
   status?: string
   /** YYYY-MM-DD; set when status = 'cancelled' */
   cancellation_date?: string | null
+  /** ISO timestamp when the row was inserted into Konats DB */
+  created_at?: string | null
+  /** ISO timestamp when the row was last updated (e.g. status changed to cancelled) */
+  updated_at?: string | null
   /** Soft-delete timestamp; null = not deleted */
   deleted_at?: string | null
 }
@@ -172,7 +176,9 @@ export function getOccupancyForDateType(
   const capacity = override?.capacity ?? null
   const snapshotDate = override?.snapshot_date ?? '1900-01-01'
 
-  // Phobs reservations booked AFTER snapshot that are still active on this date
+  // Phobs reservations inserted into Konats AFTER snapshot that are still active on this date.
+  // Uses created_at (DB insert timestamp) instead of booked_date (guest booking date) so that
+  // same-day imports (Excel at 11:32, Phobs at 18:29) are correctly captured as new data.
   const phobsDelta = reservations
     .filter(
       (r) =>
@@ -180,14 +186,15 @@ export function getOccupancyForDateType(
         r.room_type_id === roomTypeId &&
         r.check_in_date <= date &&
         r.check_out_date > date &&
-        r.booked_date > snapshotDate &&
+        (r.created_at ?? r.booked_date) > snapshotDate &&
         ACTIVE_STATUSES.has(r.status ?? '') &&
         (r.deleted_at === null || r.deleted_at === undefined)
     )
     .reduce((sum, r) => sum + r.rooms_count, 0)
 
-  // Phobs reservations booked BEFORE snapshot (already in baseline) but
-  // cancelled AFTER snapshot (baseline doesn't reflect the cancellation yet)
+  // Phobs reservations inserted BEFORE snapshot (already in baseline) but whose status was
+  // changed to cancelled AFTER snapshot (baseline doesn't reflect the cancellation yet).
+  // Uses updated_at (row-update timestamp) instead of cancellation_date (informational only).
   const phobsCancellations = reservations
     .filter(
       (r) =>
@@ -195,10 +202,8 @@ export function getOccupancyForDateType(
         r.room_type_id === roomTypeId &&
         r.check_in_date <= date &&
         r.check_out_date > date &&
-        r.booked_date <= snapshotDate &&
         r.status === 'cancelled' &&
-        r.cancellation_date != null &&
-        r.cancellation_date > snapshotDate &&
+        (r.updated_at ?? r.cancellation_date ?? '') > snapshotDate &&
         (r.deleted_at === null || r.deleted_at === undefined)
     )
     .reduce((sum, r) => sum + r.rooms_count, 0)
